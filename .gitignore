@@ -1,0 +1,73 @@
+# ======================
+# Python
+# ======================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pdb
+*$py.class
+
+# Virtual environment
+venv/
+env/
+.venv/
+ENV/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# ======================
+# Logs & Datasets
+# ======================
+logs/
+*.log
+*.csv
+*.json
+
+# Keep empty logs dir but ignore contents
+!logs/
+logs/*
+
+# ======================
+# Environment files
+# ======================
+.env
+.env.*
+
+# ======================
+# OS / Misc
+# ======================
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Icon?
+desktop.ini
+
+# ======================
+# IDE / Editor settings
+# ======================
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# ======================
+# Jupyter Notebook
+# ======================
+.ipynb_checkpoints/
+
+# ======================
+# Backup files
+# ======================
+*.bak
+*.swp
+*.tmp
+
+# ======================
+# Exported files
+# ======================
+export/

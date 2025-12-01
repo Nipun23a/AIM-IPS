@@ -1,0 +1,88 @@
+# -------------------------------------------------------
+#  PYTHON & PROJECT ENVIRONMENT
+# -------------------------------------------------------
+
+# Virtual environments
+venv/
+.env/
+.venv/
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# VSCode
+.vscode/
+.idea/
+*.code-workspace
+
+# -------------------------------------------------------
+#  DATA FILES (IGNORE ALL CSVs & RAW NETWORK DATA)
+# -------------------------------------------------------
+
+# All dataset files
+*.csv
+*.tsv
+*.xlsx
+*.json
+
+# If you want to allow only sample_inference.csv:
+# !data/sample_inference.csv
+
+# Raw pcap files
+*.pcap
+*.pcapng
+
+# Data directories
+data/
+datasets/
+raw/
+logs/
+
+# -------------------------------------------------------
+#  MODEL FILES (KERAS, PKL, WEIGHTS)
+# -------------------------------------------------------
+
+# Keras / TensorFlow models
+models/*.keras
+models/*.h5
+models/*.pb
+models/*.tflite
+
+# Pickle model files
+models/*.pkl
+*.pkl
+
+# Checkpoints
+*.ckpt
+*.index
+*.meta
+
+# -------------------------------------------------------
+#  NODE / FRONTEND (if you add FastAPI + frontend later)
+# -------------------------------------------------------
+
+node_modules/
+dist/
+build/
+
+# -------------------------------------------------------
+#  OS / TEMP / MISC
+# -------------------------------------------------------
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/

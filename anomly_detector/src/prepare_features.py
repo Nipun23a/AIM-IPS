@@ -11,7 +11,7 @@ def intersect_features(dfs: List[pd.DataFrame]) -> List[str]:
     inter = set.intersection(*sets)
     inter = list(inter)
     # Remove columns that are obviously non-numeric or identifiers we don't want
-    blacklist = {'srcip','dstip','Timestamp','Flow ID','Label','attack_cat','attack_category','id','start_time','end_time'}
+    blacklist = {'srcip','proto','service','state','dstip','Timestamp','Flow ID','Label','attack_cat','attack_category','id','start_time','end_time'}
     inter = [c for c in inter if c not in blacklist]
     # Keep stable order
     inter.sort()
@@ -29,7 +29,7 @@ def prepare_from_paths(paths, label_col_candidates=None):
         dff = df[features].copy()
         # try to find a label column (common names)
         label = None
-        possible = ['Label','label','Attack','attack','class','Class','attack_category']
+        possible = ['Label','label','Attack','attack','class','Class','attack_cat']
         for cand in possible:
             if cand in df.columns:
                 label = df[cand]

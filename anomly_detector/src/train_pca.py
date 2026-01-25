@@ -2,12 +2,13 @@
 import os
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import IsolationForest
+from sklearn.decomposition import PCA
+from scipy.spatial.distance import mahalanobis
 from sklearn.preprocessing import MinMaxScaler
 import tensorflow as tf
 from tensorflow.keras import layers, models, regularizers
 from src.prepare_features import prepare_from_paths
-from src.utils import save_scaler, save_isof, save_ae, ensure_dir
+from src.utils import save_scaler, save_ae, ensure_dir
 from pathlib import Path
 import sys
 import joblib
@@ -25,9 +26,28 @@ BASE_DIR = Path(__file__).resolve().parents[1]   # <project-root>/anomly_detecto
 DATA_DIR = BASE_DIR / "data"
 MODELS_DIR = BASE_DIR / "models"
 
-# Hyperparams
-ISO_N_ESTIMATORS = 200
-ISO_CONTAMINATION = 0.02
+
+def fit_pca_mahalanobis(X_train_norm_scaled, n_components=0.95):
+    """
+    Fit PCA on normal data and compute mean + inverse covariance
+    """
+    pca = PCA(n_components=n_components, random_state=42)
+    X_pca = pca.fit_transform(X_train_norm_scaled)
+
+    mean_vec = np.mean(X_pca, axis=0)
+    cov = np.cov(X_pca, rowvar=False)
+    cov += np.eye(cov.shape[0]) * 1e-6  # numerical stability
+    inv_cov = np.linalg.inv(cov)
+
+    return pca, mean_vec, inv_cov
+
+
+def mahalanobis_scores(X_scaled, pca, mean_vec, inv_cov):
+    X_pca = pca.transform(X_scaled)
+    diffs = X_pca - mean_vec
+    scores = np.einsum("ij,jk,ik->i", diffs, inv_cov, diffs)
+    return scores
+
 
 def build_sparse_autoencoder(input_dim, encoding_dim1=64, encoding_dim2=32, l1=1e-5):
     inp = layers.Input(shape=(input_dim,))
@@ -39,24 +59,18 @@ def build_sparse_autoencoder(input_dim, encoding_dim1=64, encoding_dim2=32, l1=1
     ae.compile(optimizer='adam', loss='mse')
     return ae
 
-def fusion_score_array(recon_err_arr, iso_pred_arr, ae_threshold, w_ae=0.7, w_if=0.3,
-                       use_iso_continuous=False, iso_decision_scores=None):
-    recon_norm = np.array(recon_err_arr, dtype=float) / (ae_threshold + 1e-12)
+def fusion_score_array(recon_err_arr, maha_scores, ae_threshold,
+                       w_ae=0.7, w_stat=0.3):
+    recon_norm = recon_err_arr / (ae_threshold + 1e-12)
     recon_norm = np.clip(recon_norm, 0.0, 1.0)
 
-    if use_iso_continuous and (iso_decision_scores is not None):
-        s = np.asarray(iso_decision_scores, dtype=float)
-        s_inv = -s
-        denom = float(np.ptp(s_inv)) if np.ptp(s_inv) is not None else 0.0
-        if denom > 0.0:
-            iso_norm = (s_inv - s_inv.min()) / denom
-        else:
-            iso_norm = np.zeros_like(s_inv, dtype=float)
-    else:
-        iso_norm = np.where(np.asarray(iso_pred_arr) == -1, 1.0, 0.0).astype(float)
+    # Normalize Mahalanobis scores
+    maha_norm = (maha_scores - maha_scores.min()) / (np.ptp(maha_scores) + 1e-12)
+    maha_norm = np.clip(maha_norm, 0.0, 1.0)
 
-    score = (w_ae * recon_norm) + (w_if * iso_norm)
+    score = (w_ae * recon_norm) + (w_stat * maha_norm)
     return np.clip(score, 0.0, 1.0)
+
 
 def _make_sample_inference_csv(features, scaler, X_full, out_path: Path, n_rows: int = 10):
     if scaler is not None and hasattr(scaler, "data_min_") and hasattr(scaler, "data_max_"):
@@ -86,16 +100,24 @@ def _make_sample_inference_csv(features, scaler, X_full, out_path: Path, n_rows:
     df_sample.to_csv(out_path, index=False)
     print(f"[train] Created zero-filled sample inference CSV -> {out_path}")
 
-def evaluate_models_on_labeled(X_scaled, recon_err, iso, iso_scores, y_true, ae_threshold, weights=(0.7,0.3)):
+def evaluate_models_on_labeled(X_scaled, recon_err, maha_scores, y_true, ae_threshold, weights=(0.7,0.3)):
     y_pred_ae = (recon_err > ae_threshold).astype(int)
-    iso_pred = iso.predict(X_scaled)
-    y_pred_if = np.where(iso_pred == -1, 1, 0).astype(int)
+    if np.any(y_true == 0):
+        maha_threshold = np.percentile(maha_scores[y_true == 0], 95)
+    else:
+        maha_threshold = np.percentile(maha_scores, 95)
+    y_pred_stat = (maha_scores > maha_threshold).astype(int)
 
-    iso_dec_scores = iso_scores
-    fusion_scores = fusion_score_array(recon_err, iso_pred, ae_threshold, w_ae=weights[0], w_if=weights[1], use_iso_continuous=True, iso_decision_scores=iso_dec_scores)
-    y_pred_fusion = (fusion_scores >= 0.5).astype(int)
+    fusion_scores = fusion_score_array(recon_err_arr = recon_err,
+                                       maha_scores = maha_scores,
+                                       ae_threshold= ae_threshold,
+                                       w_ae = weights[0],
+                                       w_stat = weights[1]
+                                       )
+    y_pred_fusion = (fusion_scores > 0.5).astype(int)
 
     results = {}
+
 
     def compute_binary_metrics(y_true, y_pred, name):
         acc = accuracy_score(y_true, y_pred)
@@ -113,17 +135,16 @@ def evaluate_models_on_labeled(X_scaled, recon_err, iso, iso_scores, y_true, ae_
         print("Confusion matrix:\n", cm)
 
     compute_binary_metrics(y_true, y_pred_ae, "Autoencoder (AE)")
-    compute_binary_metrics(y_true, y_pred_if, "IsolationForest (IF)")
-    compute_binary_metrics(y_true, y_pred_fusion, "Fusion Gate (AE+IF)")
+    compute_binary_metrics(y_true, y_pred_stat, "PCA + Mahalanobis")
+    compute_binary_metrics(y_true, y_pred_fusion, "Fusion Gate (AE+Stat)")
 
     try:
         if len(np.unique(y_true)) > 1:
             auc_ae = roc_auc_score(y_true, recon_err)
-            iso_cont = -np.array(iso_scores)
-            auc_if = roc_auc_score(y_true, iso_cont)
+            auc_stat = roc_auc_score(y_true, maha_scores)
             auc_fusion = roc_auc_score(y_true, fusion_scores)
-            print(f"\nAUCs: AE={auc_ae:.4f}, IF={auc_if:.4f}, Fusion={auc_fusion:.4f}")
-            results['auc'] = {'ae': float(auc_ae), 'if': float(auc_if), 'fusion': float(auc_fusion)}
+            print(f"\nAUCs: AE={auc_ae:.4f}, PCA={auc_stat:.4f}, Fusion={auc_fusion:.4f}")
+            results['auc'] = {'ae': float(auc_ae), 'PCA/Maha': float(auc_stat), 'fusion': float(auc_fusion)}
     except Exception as e:
         print("AUC calculation failed:", e)
 
@@ -216,15 +237,17 @@ def train_with_train_and_test_files(train_paths, test_paths, model_name_prefix="
     reconstructed_test = ae.predict(X_test_scaled)
     recon_err_test = np.mean(np.power(X_test_scaled - reconstructed_test, 2), axis=1)
 
-    # Train IsolationForest on training data only
-    
-    iso = IsolationForest(n_estimators=ISO_N_ESTIMATORS, contamination=ISO_CONTAMINATION, random_state=42)
-    print("[train] Training IsolationForest (on training data)...")
-    iso.fit(X_train_scaled)
+    # Train PCA + Mahalanobis on NORMAL training data only
+    print("[train] Training PCA + Mahalanobis (on training normals)...")
+    pca, maha_mean, maha_inv_cov = fit_pca_mahalanobis(X_train_norm_scaled)
 
-    isof_path = os.path.join(MODELS_DIR, f"{model_name_prefix}_isof.pkl")
-    print(f"[train] Saving IsolationForest -> {isof_path}")
-    save_isof(iso, isof_path)
+    # Save statistical model
+    joblib.dump(pca, MODELS_DIR / f"{model_name_prefix}_pca.pkl")
+    joblib.dump(maha_mean, MODELS_DIR / f"{model_name_prefix}_maha_mean.pkl")
+    joblib.dump(maha_inv_cov, MODELS_DIR / f"{model_name_prefix}_maha_inv_cov.pkl")
+
+    print("[train] Saved PCA + Mahalanobis models")
+
 
     # Save features
     features_path = os.path.join(MODELS_DIR, f"{model_name_prefix}_features.pkl")
@@ -269,22 +292,32 @@ def train_with_train_and_test_files(train_paths, test_paths, model_name_prefix="
 
             recon_err_test_labeled = recon_err_test[labeled_mask_test]
 
-            iso_pred_test = iso.predict(X_test_scaled)
-            iso_decision_test = iso.decision_function(X_test_scaled)
+            maha_scores_train = mahalanobis_scores(X_train_scaled, pca, maha_mean, maha_inv_cov)
+            maha_scores_test = mahalanobis_scores(X_test_scaled, pca, maha_mean, maha_inv_cov)
 
-            iso_pred_l = iso_pred_test[labeled_mask_test]
-            iso_decision_l = iso_decision_test[labeled_mask_test]
+            maha_scores_test_labeled = maha_scores_test[labeled_mask_test]
 
-            metrics = evaluate_models_on_labeled(X_test_labeled_scaled, recon_err_test_labeled, iso, iso_decision_l, y_test_labeled, ae_threshold, weights=(0.7,0.3))
+            metrics = evaluate_models_on_labeled(
+                X_test_labeled_scaled,
+                recon_err_test_labeled,
+                maha_scores_test_labeled,
+                y_test_labeled,
+                ae_threshold,
+                weights=(0.7, 0.3)
+            )
+
             print("\n[train] Evaluation summary on test set:", metrics)
 
     return {
         'ae': ae,
-        'iso': iso,
+        'pca': pca,
+        'maha_mean': maha_mean,
+        'maha_inv_cov': maha_inv_cov,
         'scaler': scaler,
         'features': features,
-        'threshold': ae_threshold
+        'ae_threshold': ae_threshold
     }
+
 
 # Keep original single-file train() for backward compatibility if needed
 def train(paths, model_name_prefix="fusion", epochs=20, batch_size=256, create_sample_csv=True, sample_rows=10, debug_eval=True):

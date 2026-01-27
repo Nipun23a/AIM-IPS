@@ -21,9 +21,10 @@ from sklearn.metrics import (
 
 # Project directories (resolve relative to this file so running from any CWD works)
 BASE_DIR = Path(__file__).resolve().parents[1]   # <project-root>/anomly_detector
-DATA_DIR = BASE_DIR / "data"
-MODELS_DIR = BASE_DIR / "models"           # AE, scaler, features, threshold saved here
-MODELS_LOF_DIR = BASE_DIR / "models_lof"   # LOF model saved here (separate folder)
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DATA_DIR = PROJECT_ROOT / "data" / "data_sets"
+MODELS_DIR = PROJECT_ROOT / "models" / "anomaly_detector"
 
 # LOF fitting settings (tuneable)
 LOF_NEIGHBORS = 50        # n_neighbors param for LOF

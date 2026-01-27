@@ -23,8 +23,10 @@ from sklearn.metrics import (
 
 # Project directories (resolve relative to this file so running from any CWD works)
 BASE_DIR = Path(__file__).resolve().parents[1]   # <project-root>/anomly_detector
-DATA_DIR = BASE_DIR / "data"
-MODELS_DIR = BASE_DIR / "models"
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DATA_DIR = PROJECT_ROOT / "data" / "data_sets"
+MODELS_DIR = PROJECT_ROOT / "models" / "anomaly_detector"
 
 
 def fit_pca_mahalanobis(X_train_norm_scaled, n_components=0.95):
@@ -203,6 +205,7 @@ def train_with_train_and_test_files(train_paths, test_paths, model_name_prefix="
     X_train_scaled = scaler.fit_transform(X_train_vals)
     X_test_scaled = scaler.transform(X_test_vals)
 
+    ensure_dir(MODELS_DIR)
     # Save scaler
     scaler_path = os.path.join(MODELS_DIR, "scaler.pkl")
     print(f"[train] Saving scaler -> {scaler_path}")

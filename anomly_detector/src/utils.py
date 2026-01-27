@@ -3,6 +3,7 @@ import numpy as np
 import os
 from sklearn.preprocessing import MinMaxScaler
 import tensorflow as tf
+from pathlib import Path
 
 def save_scaler(scaler,path):
     joblib.dump(scaler, path)
@@ -25,6 +26,6 @@ def load_ae(path):
     return tf.keras.models.load_model(path)
 
 def ensure_dir(path):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    Path(path).mkdir(parents=True, exist_ok=True)
 
 

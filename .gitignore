@@ -71,3 +71,9 @@ desktop.ini
 # Exported files
 # ======================
 export/
+
+
+# ======================
+# Model files
+# ======================
+models/

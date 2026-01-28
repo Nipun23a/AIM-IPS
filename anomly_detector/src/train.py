@@ -6,8 +6,8 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.neighbors import LocalOutlierFactor
 import tensorflow as tf
 from tensorflow.keras import layers, models, regularizers
-from src.prepare_features import prepare_from_paths
-from src.utils import save_scaler, save_ae
+from anomly_detector.src.prepare_features import prepare_from_paths
+from anomly_detector.src.utils import save_scaler, save_ae
 from pathlib import Path
 import sys
 import joblib
@@ -19,11 +19,8 @@ from sklearn.metrics import (
     confusion_matrix
 )
 
-# Project directories (resolve relative to this file so running from any CWD works)
-BASE_DIR = Path(__file__).resolve().parents[1]   # <project-root>/anomly_detector
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DATA_DIR = PROJECT_ROOT / "data" / "data_sets"
+DATA_DIR = PROJECT_ROOT / "data_collector" / "data_sets"
 MODELS_DIR = PROJECT_ROOT / "models" / "anomaly_detector"
 
 # LOF fitting settings (tuneable)

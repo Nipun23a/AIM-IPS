@@ -1,10 +1,13 @@
-import json, os, csv
+import json, csv
+from pathlib import Path
 
-LOG = os.path.join("logs", "honeypot_log.json")
-OUT_DIR = os.path.join("logs", "export")
-OUT = os.path.join(OUT_DIR, "honeypot_log.csv")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DATA_DIR = PROJECT_ROOT / "data_collector"
 
-os.makedirs(OUT_DIR, exist_ok=True)
+LOG = DATA_DIR / "honeypot_log.json"
+OUT = DATA_DIR / "honeypot_log.csv"
+
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 def flatten(row):
     ti = row.get("threat_intel") or {}
@@ -15,32 +18,34 @@ def flatten(row):
         "path": row.get("path"),
         "query_params": json.dumps(row.get("query_params", {}), ensure_ascii=False),
         "form_data": json.dumps(row.get("form_data", {}), ensure_ascii=False),
-        "raw_body": row.get("raw_body",""),
+        "raw_body": row.get("raw_body", ""),
         "tags": "|".join(row.get("tags", [])),
         "ti_found": str(ti.get("ti_found", False)),
-        "ti_source": ti.get("ti_source",""),
-        "ti_raw": json.dumps(ti.get("ti_raw", {}), ensure_ascii=False) if ti and ti.get("ti_found") else ""
+        "ti_source": ti.get("ti_source", ""),
+        "ti_raw": json.dumps(ti.get("ti_raw", {}), ensure_ascii=False)
+        if ti and ti.get("ti_found") else ""
     }
 
 def main():
-    rows = []
-    if os.path.exists(LOG):
-        with open(LOG, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            for r in data:
-                rows.append(flatten(r))
-    else:
+    if not LOG.exists():
         print("No log file found:", LOG)
         return
 
-    if not rows:
+    with LOG.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    if not data:
         print("No rows to export")
         return
 
-    with open(OUT, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
-        w.writeheader()
-        w.writerows(rows)
+    rows = [flatten(r) for r in data]
+
+    # ✅ Overwrite safely (no unlink)
+    with OUT.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=rows[0].keys())
+        writer.writeheader()
+        writer.writerows(rows)
+
     print("Exported ->", OUT)
 
 if __name__ == "__main__":

@@ -1,0 +1,2 @@
+def application():
+    return None

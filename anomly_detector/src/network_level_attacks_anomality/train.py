@@ -3,12 +3,10 @@ import os
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
-from scipy.spatial.distance import mahalanobis
 from sklearn.preprocessing import MinMaxScaler
-import tensorflow as tf
 from tensorflow.keras import layers, models, regularizers
-from anomly_detector.src.prepare_features import prepare_from_paths
-from anomly_detector.src.utils import save_scaler, save_ae, ensure_dir
+from anomly_detector.src.network_level_attacks_anomality.prepare_features import prepare_from_paths
+from anomly_detector.src.network_level_attacks_anomality.utils import save_scaler, save_ae, ensure_dir
 from pathlib import Path
 import sys
 import joblib
@@ -17,14 +15,13 @@ from sklearn.metrics import (
     accuracy_score,
     precision_recall_fscore_support,
     roc_auc_score,
-    confusion_matrix,
-    classification_report
+    confusion_matrix
 )
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DATA_DIR = PROJECT_ROOT / "data_collector" / "data_sets"
-MODELS_DIR = PROJECT_ROOT / "models" / "anomaly_detector"
+MODELS_DIR = PROJECT_ROOT / "models" / "anomaly_detector" / "network_level_anomality"
 
 
 def fit_pca_mahalanobis(X_train_norm_scaled, n_components=0.95):

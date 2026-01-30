@@ -1,7 +1,7 @@
 import pandas as pd
 
 # Path to your CICIDS training file
-CSV_PATH = "data_collector/data_sets/cicids_train.csv"
+CSV_PATH = "data_collector/data_sets/cicids/cicids_train_part1.csv"
 
 # Possible label column names (robust)
 LABEL_COL_CANDIDATES = [
@@ -12,6 +12,8 @@ LABEL_COL_CANDIDATES = [
 
 # Load CSV
 df = pd.read_csv(CSV_PATH)
+
+df.columns = df.columns.str.strip()
 
 # Detect label column
 label_col = None

@@ -11,67 +11,107 @@ from sklearn.metrics import classification_report, confusion_matrix
 # =========================
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-DATA_DIR = PROJECT_ROOT / "data_collector" / "data_sets"
+DATA_DIR = PROJECT_ROOT / "data_collector" / "data_sets" / "cicids"
 MODELS_DIR = PROJECT_ROOT / "models" / "threat_classifier"
 
 os.makedirs(MODELS_DIR, exist_ok=True)
 
 DATA_PATHS = [
-    DATA_DIR / "cicids_train.csv"
+    DATA_DIR / "cicids_train_part1.csv",
+    DATA_DIR / "cicids_train_part2.csv",
+    DATA_DIR / "cicids_train_part3.csv",
+    DATA_DIR / "cicids_train_part4.csv",
+    DATA_DIR / "cicids_train_part5.csv",
+    DATA_DIR / "cicids_train_part6.csv",
+    DATA_DIR / "cicids_train_part7.csv",
+    DATA_DIR / "cicids_train_part8.csv",
 ]
 
 # =========================
-# Imports (shared features + labels)
+# Imports
 # =========================
-from anomly_detector.src.prepare_features import prepare_from_paths
+from threat_classifier.src.features import THREAT_FEATURES
 from threat_classifier.src.labels import LABEL_MAP
 
 # =========================
-# Load RAW dataset (for labels)
+# Load datasets + prepare X,Y
 # =========================
-print("[train_classifier] Loading raw dataset...")
-df_raw = pd.read_csv(DATA_PATHS[0])
+print("[train_classifier] Loading datasets and preparing features + labels...")
 
-# Keep only rows with labels we know how to classify
-df_raw = df_raw[df_raw["label"].isin(LABEL_MAP.keys())].copy()
+Xs = []
+Ys = []
 
-if df_raw.empty:
-    raise RuntimeError("No matching labels found. Check LABEL_MAP vs dataset labels.")
+for path in DATA_PATHS:
+    print(f"[train_classifier] Processing {path.name}")
+
+    df = pd.read_csv(path)
+
+    # Normalize column names
+    df.columns = df.columns.str.strip().str.lower()
+
+    # Ensure label column exists
+    if "label" not in df.columns:
+        print(f"[WARN] 'label' column not found in {path.name}, skipping")
+        continue
+
+    # Normalize label values
+    df["label"] = (
+        df["label"]
+        .astype(str)
+        .str.strip()
+        .str.replace("�", "-", regex=False)
+        .str.lower()
+    )
+
+    # Keep only known labels
+    df = df[df["label"].isin(LABEL_MAP.keys())].copy()
+    if df.empty:
+        continue
+
+    # Check required features
+    missing = set(THREAT_FEATURES) - set(df.columns)
+    if missing:
+        raise RuntimeError(f"Missing features in {path.name}: {missing}")
+
+    # Extract features + labels TOGETHER
+    X = df[THREAT_FEATURES].astype(float)
+    Y = df["label"].map(LABEL_MAP)
+
+    # Drop rows with NaN (both X & Y stay aligned)
+    mask = ~X.isnull().any(axis=1)
+    X = X[mask]
+    Y = Y[mask]
+
+    Xs.append(X)
+    Ys.append(Y)
 
 # =========================
-# Feature extraction (shared pipeline)
+# Final dataset
 # =========================
-print("[train_classifier] Extracting features using shared pipeline...")
-X_all, _, features = prepare_from_paths(DATA_PATHS)
+X_all = pd.concat(Xs, ignore_index=True)
+Y_all = pd.concat(Ys, ignore_index=True)
 
-# Align features with filtered raw labels
-X = X_all.loc[df_raw.index]
-Y = df_raw["label"].map(LABEL_MAP)
+print("\n[train_classifier] Final dataset shape:", X_all.shape)
+print("[train_classifier] Label distribution:\n", Y_all.value_counts())
 
-# =========================
-# Safety checks
-# =========================
-print("\n[train_classifier] Class distribution:")
-print(Y.value_counts())
-
-if Y.isna().any():
-    raise RuntimeError("Label mapping produced NaN values. Fix LABEL_MAP.")
+assert len(X_all) == len(Y_all), "X and Y size mismatch"
+assert not X_all.isnull().any().any(), "NaN values found in features"
 
 # =========================
 # Train / Test split
 # =========================
 X_train, X_test, y_train, y_test = train_test_split(
-    X,
-    Y,
+    X_all,
+    Y_all,
     test_size=0.2,
-    stratify=Y,
+    stratify=Y_all,
     random_state=42
 )
 
 # =========================
 # Train LightGBM
 # =========================
-print("\n[train_classifier] Training LightGBM classifier...")
+print("\n[train_classifier] Training LightGBM...")
 
 model = lgb.LGBMClassifier(
     n_estimators=300,
@@ -89,15 +129,15 @@ model.fit(X_train, y_train)
 y_pred = model.predict(X_test)
 
 print("\n[train_classifier] Classification Report:")
-print(classification_report(y_test, y_pred))
+print(classification_report(y_test, y_pred, digits=4))
 
 print("\n[train_classifier] Confusion Matrix:")
 print(confusion_matrix(y_test, y_pred))
 
 # =========================
-# Save model + feature list
+# Save model
 # =========================
 joblib.dump(model, MODELS_DIR / "lgb_model.pkl")
-joblib.dump(features, MODELS_DIR / "features.pkl")
+joblib.dump(THREAT_FEATURES, MODELS_DIR / "features.pkl")
 
-print(f"\n[train_classifier] Model and features saved to: {MODELS_DIR}")
+print(f"\n[train_classifier] Model saved to: {MODELS_DIR}")

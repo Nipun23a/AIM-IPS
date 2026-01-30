@@ -1,4 +1,3 @@
-import os
 import joblib
 import pandas as pd
 import lightgbm as lgb

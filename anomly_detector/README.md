@@ -5,6 +5,8 @@ Contains unsupervised or semi-supervised models for flagging anomalous behavior.
 ## Suggested Models
 
 - Autoencoders
+- Fusion Models
+- PCA / Mehabolism
 - Isolation Forest
 - One-Class SVM
 

@@ -4,11 +4,12 @@ import lightgbm as lgb
 from pathlib import Path
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, confusion_matrix
+import os
 
 # =========================
 # Paths
 # =========================
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 DATA_DIR = PROJECT_ROOT / "data_collector" / "data_sets" / "cicids"
 MODELS_DIR = PROJECT_ROOT / "models" / "threat_classifier"
@@ -29,8 +30,8 @@ DATA_PATHS = [
 # =========================
 # Imports
 # =========================
-from threat_classifier.src.features import THREAT_FEATURES
-from threat_classifier.src.labels import LABEL_MAP
+from threat_classifier.src.network_level_threat_classifier.features import THREAT_FEATURES
+from threat_classifier.src.network_level_threat_classifier.labels import LABEL_MAP
 
 # =========================
 # Load datasets + prepare X,Y

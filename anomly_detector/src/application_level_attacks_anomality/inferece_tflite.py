@@ -514,9 +514,6 @@ def main():
     PROJECT_ROOT = Path(__file__).resolve().parents[3]
     MODELS_DIR = PROJECT_ROOT / "models" / "anomaly_detector" / "application_level_attacks"
     
-    # Alternative: Use absolute path
-    # MODELS_DIR = Path(r"D:\Final-Year-Research\AIM-IPS\models\anomaly_detector\application_level_attacks")
-    
     print(f"Project root: {PROJECT_ROOT}")
     print(f"Models directory: {MODELS_DIR}")
     

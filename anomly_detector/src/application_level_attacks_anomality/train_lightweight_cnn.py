@@ -10,7 +10,6 @@ from anomly_detector.src.application_level_attacks_anomality.prepare_from_paths 
 from anomly_detector.src.network_level_attacks_anomality.utils import save_scaler, ensure_dir
 from pathlib import Path
 import subprocess
-from onnxruntime.quantization import quantize_dynamic, QuantType
 import sys
 import joblib
 
@@ -48,7 +47,7 @@ def mahalanobis_scores(X_scaled, pca, mean_vec, inv_cov):
     scores = np.einsum("ij,jk,ik->i", diffs, inv_cov, diffs)
     return scores
 
-def convert_model_to_onnx(model, model_dir: Path, model_name: str):
+
     """
     Convert trained Keras (Keras 3) model → ONNX → INT8 ONNX
     """
@@ -93,9 +92,6 @@ def convert_model_to_onnx(model, model_dir: Path, model_name: str):
     print(f"   INT8: {onnx_int8_path}")
     print("   Expected inference: 0.3–0.8 ms (batch=1)")
     print("="*80 + "\n")
-
-
-
 def build_lightweight_cnn(input_dim=15):
     """
     ⚡ LIGHTWEIGHT 1D CNN - RECOMMENDED FOR PRODUCTION

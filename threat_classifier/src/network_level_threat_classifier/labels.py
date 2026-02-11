@@ -1,18 +1,13 @@
 LABEL_MAP = {
     "benign": 0,
 
-    # Web attacks
-    "web attack - sql injection": 1,
-    "web attack - brute force": 2,
-    "web attack - xss": 3,
-
     # DoS / DDoS
-    "dos hulk": 4,
-    "dos goldeneye": 4,
-    "dos slowloris": 4,
-    "dos slowhttptest": 4,
-    "ddos": 4,
+    "dos hulk": 1,
+    "dos goldeneye": 1,
+    "dos slowloris": 1,
+    "dos slowhttptest": 1,
+    "ddos": 1,
 
     # Scanning
-    "portscan": 5
+    "portscan": 2
 }

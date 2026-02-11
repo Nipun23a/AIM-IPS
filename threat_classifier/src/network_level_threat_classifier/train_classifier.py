@@ -3,7 +3,12 @@ import pandas as pd
 import lightgbm as lgb
 from pathlib import Path
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import (
+    classification_report,
+    confusion_matrix,
+    f1_score,
+    roc_auc_score
+)
 import os
 
 # =========================
@@ -28,13 +33,13 @@ DATA_PATHS = [
 ]
 
 # =========================
-# Imports
+# Imports (Project)
 # =========================
 from threat_classifier.src.network_level_threat_classifier.features import THREAT_FEATURES
 from threat_classifier.src.network_level_threat_classifier.labels import LABEL_MAP
 
 # =========================
-# Load datasets + prepare X,Y
+# Load datasets
 # =========================
 print("[train_classifier] Loading datasets and preparing features + labels...")
 
@@ -49,12 +54,11 @@ for path in DATA_PATHS:
     # Normalize column names
     df.columns = df.columns.str.strip().str.lower()
 
-    # Ensure label column exists
     if "label" not in df.columns:
         print(f"[WARN] 'label' column not found in {path.name}, skipping")
         continue
 
-    # Normalize label values
+    # Normalize labels
     df["label"] = (
         df["label"]
         .astype(str)
@@ -68,16 +72,15 @@ for path in DATA_PATHS:
     if df.empty:
         continue
 
-    # Check required features
+    # Ensure required features exist
     missing = set(THREAT_FEATURES) - set(df.columns)
     if missing:
         raise RuntimeError(f"Missing features in {path.name}: {missing}")
 
-    # Extract features + labels TOGETHER
     X = df[THREAT_FEATURES].astype(float)
     Y = df["label"].map(LABEL_MAP)
 
-    # Drop rows with NaN (both X & Y stay aligned)
+    # Drop NaNs safely
     mask = ~X.isnull().any(axis=1)
     X = X[mask]
     Y = Y[mask]
@@ -98,7 +101,7 @@ assert len(X_all) == len(Y_all), "X and Y size mismatch"
 assert not X_all.isnull().any().any(), "NaN values found in features"
 
 # =========================
-# Train / Test split
+# Train / Test Split
 # =========================
 X_train, X_test, y_train, y_test = train_test_split(
     X_all,
@@ -126,13 +129,37 @@ model.fit(X_train, y_train)
 # =========================
 # Evaluation
 # =========================
-y_pred = model.predict(X_test)
+print("\n[train_classifier] Evaluating model...")
 
-print("\n[train_classifier] Classification Report:")
+y_pred = model.predict(X_test)
+y_proba = model.predict_proba(X_test)
+
+# ---- Classification Report ----
+print("\n=== Classification Report ===")
 print(classification_report(y_test, y_pred, digits=4))
 
-print("\n[train_classifier] Confusion Matrix:")
+# ---- Confusion Matrix ----
+print("\n=== Confusion Matrix ===")
 print(confusion_matrix(y_test, y_pred))
+
+# ---- F1 Scores ----
+f1_macro = f1_score(y_test, y_pred, average="macro")
+f1_weighted = f1_score(y_test, y_pred, average="weighted")
+
+print("\n=== F1 Scores ===")
+print(f"Macro F1-score:    {f1_macro:.4f}")
+print(f"Weighted F1-score: {f1_weighted:.4f}")
+
+# ---- ROC-AUC (Multi-class OvR) ----
+try:
+    auc_ovr = roc_auc_score(
+        y_test,
+        y_proba,
+        multi_class="ovr"
+    )
+    print(f"\nROC-AUC (One-vs-Rest): {auc_ovr:.4f}")
+except Exception as e:
+    print("ROC-AUC could not be computed:", e)
 
 # =========================
 # Save model

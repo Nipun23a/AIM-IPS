@@ -5,8 +5,8 @@ import pandas as pd
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras import layers, models, regularizers
-from anomly_detector.src.prepare_features import prepare_from_paths
-from anomly_detector.src.utils import save_scaler, save_ae, ensure_dir
+from anomly_detector.src.network_level_attacks_anomality.prepare_features import prepare_from_paths
+from anomly_detector.src.network_level_attacks_anomality.utils import save_scaler, save_ae, ensure_dir
 from pathlib import Path
 import sys
 import joblib
@@ -19,7 +19,7 @@ from sklearn.metrics import (
 )
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DATA_DIR = PROJECT_ROOT / "data_collector" / "data_sets"
 MODELS_DIR = PROJECT_ROOT / "models" / "anomaly_detector"
 

@@ -8,3 +8,5 @@ uvicorn>=0.22
 pydantic
 lightgbm
 python-multipart
+seaborn
+matplotlib

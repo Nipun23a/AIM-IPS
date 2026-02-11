@@ -11,6 +11,7 @@ from sklearn.metrics import classification_report, confusion_matrix, roc_auc_sco
 import matplotlib.pyplot as plt
 import seaborn as sns
 from typing import Tuple, List
+import joblib
 
 
 gpus = tf.config.list_physical_devices('GPU')
@@ -29,21 +30,25 @@ else:
 # ============================================================================
 BASE_DIR = Path(__file__).resolve().parents[3] / "models" / "anomly_detector" / "network_level_attacks_anomality"
 TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
-DATASET_DIR = Path(__file__).resolve().parents[3] /"data_collector" / "data_sets"  
+DATASET_DIR = Path(__file__).resolve().parents[3] / "data_collector" / "data_sets"  
 
 TCN_DIR = BASE_DIR / "tcn"
 PLOTS_DIR = TCN_DIR / "plots"
 MODELS_DIR = TCN_DIR / "models"
 LOGS_DIR = TCN_DIR / "logs"
 
-for d in [TCN_DIR, PLOTS_DIR, MODELS_DIR, LOGS_DIR]:
+# Create all directories
+for d in [BASE_DIR, TCN_DIR, PLOTS_DIR, MODELS_DIR, LOGS_DIR]:
     os.makedirs(d, exist_ok=True)
 
 print(f"TCN outputs will be saved to: {TCN_DIR}")
 
+# Scaler will be saved to the base anomaly detector directory
+SCALER_PATH = BASE_DIR / "scaler.pkl"
+
 
 # ============================================================================
-# DATA LOADING FUNCTIONS (YOUR EXISTING CODE)
+# DATA LOADING FUNCTIONS
 # ============================================================================
 def load_csv(path):
     """Load CSV file"""
@@ -104,6 +109,7 @@ def prepare_from_paths(paths, label_col_candidates=None):
 def preprocess_cicids_data(train_path, test_path):
     """
     Load and preprocess CICIDS train and test datasets
+    Returns preprocessed data + saves scaler for later use
     """
     print("\n" + "="*70)
     print("LOADING AND PREPROCESSING CICIDS2017 DATASET")
@@ -119,14 +125,14 @@ def preprocess_cicids_data(train_path, test_path):
     print(f"   Number of features: {len(features)}")
     
     # Convert labels to binary (0 = benign, 1 = attack)
-    # Assuming label "0" or "BENIGN" means benign traffic
     def convert_to_binary(y):
         if y.dtype == 'object':
             # String labels
-            return (y.str.upper() != 'BENIGN').astype(int)
+            binary = (y.str.upper() != 'BENIGN').astype(int)
         else:
             # Numeric labels (assuming 0 = benign)
-            return (y != 0).astype(int)
+            binary = (y != 0).astype(int)
+        return binary
     
     y_train = convert_to_binary(y_train_raw)
     y_test = convert_to_binary(y_test_raw)
@@ -152,6 +158,11 @@ def preprocess_cicids_data(train_path, test_path):
     X_train_scaled = scaler.fit_transform(X_train_raw)
     X_test_scaled = scaler.transform(X_test_raw)
     
+    # 🔥 SAVE SCALER FOR LATER USE
+    print(f"\n💾 Saving scaler to: {SCALER_PATH}")
+    joblib.dump(scaler, SCALER_PATH)
+    print(f"✅ Scaler saved successfully!")
+    
     # Create validation split from training data (20% for validation)
     X_train_final, X_val, y_train_final, y_val = train_test_split(
         X_train_scaled, y_train,
@@ -165,6 +176,16 @@ def preprocess_cicids_data(train_path, test_path):
     print(f"   Validation shape: {X_val.shape}")
     print(f"   Test shape: {X_test_scaled.shape}")
     print(f"   Input dimension: {X_train_final.shape[1]}")
+    
+    # Save feature names for reference
+    feature_info = {
+        'features': features,
+        'n_features': len(features),
+        'timestamp': TIMESTAMP
+    }
+    feature_path = BASE_DIR / "feature_info.pkl"
+    joblib.dump(feature_info, feature_path)
+    print(f"   Feature info saved to: {feature_path}")
     
     return X_train_final, X_val, X_test_scaled, y_train_final, y_val, y_test, scaler, features
 
@@ -293,12 +314,19 @@ def train_tcn(X_train, y_train, X_val, y_val, input_dim,
     else:
         model = build_lightweight_tcn(input_dim, num_blocks=3, filters=32)
     
-    # Compile with class weights for imbalanced data
+    # Calculate class weights for imbalanced data
+    n_benign = np.sum(y_train == 0)
+    n_attack = np.sum(y_train == 1)
+    total = len(y_train)
+    
     class_weight = {
-        0: 1.0,
-        1: len(y_train[y_train==0]) / len(y_train[y_train==1])
+        0: total / (2 * n_benign),
+        1: total / (2 * n_attack)
     }
-    print(f"\n⚖️  Class weights: {class_weight}")
+    print(f"\n⚖️  Class distribution:")
+    print(f"   Benign: {n_benign:,} ({n_benign/total*100:.1f}%)")
+    print(f"   Attack: {n_attack:,} ({n_attack/total*100:.1f}%)")
+    print(f"   Class weights: {class_weight}")
     
     model.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
@@ -312,6 +340,8 @@ def train_tcn(X_train, y_train, X_val, y_val, input_dim,
     )
     
     # Callbacks
+    model_save_path = MODELS_DIR / f"best_tcn_{model_type}_{TIMESTAMP}.keras"
+    
     callbacks = [
         tf.keras.callbacks.EarlyStopping(
             monitor='val_auc',
@@ -328,11 +358,16 @@ def train_tcn(X_train, y_train, X_val, y_val, input_dim,
             verbose=1
         ),
         tf.keras.callbacks.ModelCheckpoint(
-            filepath=os.path.join(MODELS_DIR, f"best_tcn_{model_type}_{TIMESTAMP}.keras"),
+            filepath=str(model_save_path),
             monitor='val_auc',
             mode='max',
             save_best_only=True,
             verbose=1
+        ),
+        tf.keras.callbacks.CSVLogger(
+            filename=str(LOGS_DIR / f"training_log_{model_type}_{TIMESTAMP}.csv"),
+            separator=',',
+            append=False
         )
     ]
     
@@ -340,6 +375,7 @@ def train_tcn(X_train, y_train, X_val, y_val, input_dim,
     print(f"\n🚀 Starting training...")
     print(f"   Epochs: {epochs}")
     print(f"   Batch size: {batch_size}")
+    print(f"   Best model will be saved to: {model_save_path}")
     
     history = model.fit(
         X_train, y_train,
@@ -352,9 +388,14 @@ def train_tcn(X_train, y_train, X_val, y_val, input_dim,
     )
     
     # Save final model
-    final_path = os.path.join(MODELS_DIR, f"final_tcn_{model_type}_{TIMESTAMP}.keras")
-    model.save(final_path)
+    final_path = MODELS_DIR / f"final_tcn_{model_type}_{TIMESTAMP}.keras"
+    model.save(str(final_path))
     print(f"\n💾 Final model saved to: {final_path}")
+    
+    # Save training history
+    history_path = LOGS_DIR / f"history_{model_type}_{TIMESTAMP}.pkl"
+    joblib.dump(history.history, history_path)
+    print(f"💾 Training history saved to: {history_path}")
     
     return model, history
 
@@ -375,17 +416,17 @@ def evaluate_model(model, X_test, y_test, model_name="TCN"):
     from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
     
     accuracy = accuracy_score(y_test, y_pred)
-    precision = precision_score(y_test, y_pred)
-    recall = recall_score(y_test, y_pred)
-    f1 = f1_score(y_test, y_pred)
+    precision = precision_score(y_test, y_pred, zero_division=0)
+    recall = recall_score(y_test, y_pred, zero_division=0)
+    f1 = f1_score(y_test, y_pred, zero_division=0)
     auc = roc_auc_score(y_test, y_pred_proba)
     
     print(f"\n📊 Test Set Performance:")
-    print(f"   Accuracy:  {accuracy*100:.2f}%")
-    print(f"   Precision: {precision*100:.2f}%")
-    print(f"   Recall:    {recall*100:.2f}%")
-    print(f"   F1-Score:  {f1*100:.2f}%")
-    print(f"   AUC-ROC:   {auc*100:.2f}%")
+    print(f"   Accuracy:  {accuracy*100:.4f}%")
+    print(f"   Precision: {precision*100:.4f}%")
+    print(f"   Recall:    {recall*100:.4f}%")
+    print(f"   F1-Score:  {f1*100:.4f}%")
+    print(f"   AUC-ROC:   {auc*100:.4f}%")
     
     # Classification report
     print(f"\n📋 Classification Report:")
@@ -395,22 +436,45 @@ def evaluate_model(model, X_test, y_test, model_name="TCN"):
     
     # Confusion matrix
     cm = confusion_matrix(y_test, y_pred)
+    TN, FP, FN, TP = cm.ravel()
+    
     print(f"\n🎯 Confusion Matrix:")
     print(f"                Predicted")
     print(f"              Benign  Attack")
-    print(f"Actual Benign  {cm[0,0]:6d}  {cm[0,1]:6d}")
-    print(f"       Attack  {cm[1,0]:6d}  {cm[1,1]:6d}")
+    print(f"Actual Benign  {TN:6d}  {FP:6d}")
+    print(f"       Attack  {FN:6d}  {TP:6d}")
     
-    return {
+    # IPS-specific metrics
+    fpr = FP / (FP + TN) if (FP + TN) > 0 else 0
+    fnr = FN / (FN + TP) if (FN + TP) > 0 else 0
+    detection_rate = TP / (TP + FN) if (TP + FN) > 0 else 0
+    
+    print(f"\n🚨 IPS Critical Metrics:")
+    print(f"   False Positive Rate: {fpr*100:.4f}%")
+    print(f"   False Negative Rate: {fnr*100:.4f}%")
+    print(f"   Detection Rate:      {detection_rate*100:.4f}%")
+    
+    # Save metrics
+    metrics = {
         'accuracy': accuracy,
         'precision': precision,
         'recall': recall,
         'f1': f1,
         'auc': auc,
+        'fpr': fpr,
+        'fnr': fnr,
+        'detection_rate': detection_rate,
+        'confusion_matrix': cm,
         'y_pred': y_pred,
         'y_pred_proba': y_pred_proba,
-        'confusion_matrix': cm
+        'y_true': y_test
     }
+    
+    metrics_path = LOGS_DIR / f"test_metrics_{TIMESTAMP}.pkl"
+    joblib.dump(metrics, metrics_path)
+    print(f"\n💾 Metrics saved to: {metrics_path}")
+    
+    return metrics
 
 
 def plot_training_history(history, model_type):
@@ -457,10 +521,11 @@ def plot_training_history(history, model_type):
     axes[1, 1].grid(True, alpha=0.3)
     
     plt.tight_layout()
-    plt.savefig(os.path.join(PLOTS_DIR, f"{model_type}_training_history_{TIMESTAMP}.png"), dpi=300)
+    plot_path = PLOTS_DIR / f"{model_type}_training_history_{TIMESTAMP}.png"
+    plt.savefig(str(plot_path), dpi=300, bbox_inches='tight')
     plt.close()
     
-    print(f"📊 Training plots saved to: {PLOTS_DIR}")
+    print(f"📊 Training plots saved to: {plot_path}")
 
 
 def plot_evaluation_results(results, model_name):
@@ -478,9 +543,7 @@ def plot_evaluation_results(results, model_name):
     axes[0].set_xlabel('Predicted Label')
     
     # ROC Curve
-    from sklearn.metrics import roc_curve
-    fpr, tpr, _ = roc_curve(results['y_true'] if 'y_true' in results else None, 
-                             results['y_pred_proba'])
+    fpr, tpr, _ = roc_curve(results['y_true'], results['y_pred_proba'])
     axes[1].plot(fpr, tpr, linewidth=2, label=f'AUC = {results["auc"]:.4f}')
     axes[1].plot([0, 1], [0, 1], 'k--', linewidth=1, label='Random')
     axes[1].set_title('ROC Curve')
@@ -490,10 +553,13 @@ def plot_evaluation_results(results, model_name):
     axes[1].grid(True, alpha=0.3)
     
     plt.tight_layout()
-    plt.savefig(os.path.join(PLOTS_DIR, f"{model_name}_evaluation_{TIMESTAMP}.png"), dpi=300)
+    plot_path = PLOTS_DIR / f"{model_name}_evaluation_{TIMESTAMP}.png"
+    plt.savefig(str(plot_path), dpi=300, bbox_inches='tight')
     plt.close()
     
-    print(f"📊 Evaluation plots saved to: {PLOTS_DIR}")
+    print(f"📊 Evaluation plots saved to: {plot_path}")
+
+
 def main(train_path, test_path, model_type='improved', epochs=50):
     """
     Main training and evaluation pipeline
@@ -525,7 +591,6 @@ def main(train_path, test_path, model_type='improved', epochs=50):
     
     # Step 4: Evaluate on test set
     results = evaluate_model(model, X_test, y_test, model_name=f"{model_type.upper()} TCN")
-    results['y_true'] = y_test
     
     # Step 5: Plot evaluation results
     plot_evaluation_results(results, f"{model_type.upper()}_TCN")
@@ -536,6 +601,29 @@ def main(train_path, test_path, model_type='improved', epochs=50):
     print("="*70)
     model.summary()
     
+    # Step 7: Save final summary
+    summary_path = LOGS_DIR / f"training_summary_{TIMESTAMP}.txt"
+    with open(summary_path, 'w') as f:
+        f.write("="*70 + "\n")
+        f.write("TRAINING SUMMARY\n")
+        f.write("="*70 + "\n")
+        f.write(f"Model Type: {model_type}\n")
+        f.write(f"Timestamp: {TIMESTAMP}\n")
+        f.write(f"Input Dimension: {input_dim}\n")
+        f.write(f"Training Samples: {len(X_train):,}\n")
+        f.write(f"Validation Samples: {len(X_val):,}\n")
+        f.write(f"Test Samples: {len(X_test):,}\n")
+        f.write("\nTest Performance:\n")
+        f.write(f"  Accuracy: {results['accuracy']*100:.4f}%\n")
+        f.write(f"  Precision: {results['precision']*100:.4f}%\n")
+        f.write(f"  Recall: {results['recall']*100:.4f}%\n")
+        f.write(f"  F1-Score: {results['f1']*100:.4f}%\n")
+        f.write(f"  AUC-ROC: {results['auc']*100:.4f}%\n")
+        f.write(f"  False Positive Rate: {results['fpr']*100:.4f}%\n")
+        f.write(f"  Detection Rate: {results['detection_rate']*100:.4f}%\n")
+    
+    print(f"\n💾 Training summary saved to: {summary_path}")
+    
     print("\n" + "="*70)
     print("✅ TRAINING AND EVALUATION COMPLETE!")
     print("="*70)
@@ -543,6 +631,8 @@ def main(train_path, test_path, model_type='improved', epochs=50):
     print(f"   - Models: {MODELS_DIR}")
     print(f"   - Plots: {PLOTS_DIR}")
     print(f"   - Logs: {LOGS_DIR}")
+    print(f"   - Scaler: {SCALER_PATH}")
+    print("="*70 + "\n")
     
     return model, history, results
 
@@ -562,6 +652,7 @@ if __name__ == "__main__":
         print(f"⚠️  ERROR: Test file not found at {TEST_PATH}")
         print("Please update TEST_PATH in the script to point to your cicids_test.csv file")
         exit(1)
+    
     print("\n🎯 Training IMPROVED TCN model...")
     model_improved, history_improved, results_improved = main(
         TRAIN_PATH, TEST_PATH,

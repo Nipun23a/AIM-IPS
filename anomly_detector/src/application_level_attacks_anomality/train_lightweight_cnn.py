@@ -416,15 +416,6 @@ def train_with_train_and_test_files(train_paths, test_paths, model_name_prefix="
     keras_path = MODELS_DIR / f"{model_name}.keras"
     model.save(keras_path, include_optimizer=False)
     print(f"\n[train] Saved Keras model -> {keras_path}")
-
-    # Convert to ONNX + INT8
-    convert_model_to_onnx(
-        model=model,
-        model_dir=MODELS_DIR,
-        model_name=model_name
-    )
-
-
     # Get CNN scores
     cnn_scores_train = model.predict(X_train_scaled, verbose=0).flatten()
     cnn_scores_test = model.predict(X_test_scaled, verbose=0).flatten()

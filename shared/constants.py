@@ -72,14 +72,21 @@ LAYER_3 = "layer3_response"
 
 # Attack Label Strings
 
-LABEL_CLEAN         = "clean"
+LABEL_NORM          = "norm"           
+LABEL_CLEAN         = "clean"          
 LABEL_SQLI          = "sqli"
 LABEL_XSS           = "xss"
-LABEL_PATH_TRAV     = "path_traversal"
-LABEL_CMD_INJECT    = "command_injection"
+LABEL_PATH_TRAV     = "path-traversal"  
+LABEL_CMD_INJECT    = "cmdi"            
 LABEL_DDOS          = "ddos"
 LABEL_PORTSCAN      = "portscan"
 LABEL_BOTNET        = "botnet"
 LABEL_ANOMALY       = "anomaly"
 LABEL_ZERODAY       = "zeroday"
 LABEL_UNKNOWN       = "unknown"
+
+ATTACK_LABELS = {LABEL_SQLI, LABEL_XSS, LABEL_PATH_TRAV, LABEL_CMD_INJECT,
+                 LABEL_DDOS, LABEL_PORTSCAN, LABEL_BOTNET, LABEL_ANOMALY, LABEL_ZERODAY}
+
+
+NORMAL_LABELS = {LABEL_NORM, LABEL_CLEAN, "normal", "benign"}

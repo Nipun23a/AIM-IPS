@@ -14,10 +14,6 @@ from shared.constants import (
 logger = logging.getLogger(__name__)
 
 class RedisClient:
-    """
-        Singleton Redis client for AIM-IPS.
-    """
-
     _instance: Optional["RedisClient"] = None
 
     def __init__(
@@ -256,7 +252,6 @@ class RedisClient:
             logger.warning(f"[Redis] get_stats failed: {e}")
             return {}
     
-    @staticmethod
     def get_redis(
             host: str = "localhost",
             port: int = 6379,

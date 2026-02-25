@@ -65,9 +65,9 @@ class CNNAnomalyDetector:
         self.features = joblib.load(features_path)
         logger.info(f"[CNN] {len(self.features)} features loaded")
 
-        pca_path      = self.model_dir / "pca.pkl"
-        mean_path     = self.model_dir / "maha_mean.pkl"
-        inv_cov_path  = self.model_dir / "maha_inv_cov.pkl"
+        pca_path      = self.model_dir / "fusion_pca.pkl"
+        mean_path     = self.model_dir / "fusion_maha_mean.pkl"
+        inv_cov_path  = self.model_dir / "fusion_maha_inv_cov.pkl"
 
         if pca_path.exists() and mean_path.exists() and inv_cov_path.exists():
             self.pca          = joblib.load(pca_path)

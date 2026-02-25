@@ -10,7 +10,7 @@ from shared.constants import (
     ACTION_ALLOW,ACTION_DELAY,ACTION_THROTTLE,ACTION_CAPTCHA,ACTION_BLOCK
     
 )
-from utils.redis_client import get_redis
+from utils.redis_client import RedisClient
 
 logger = logging.getLogger(__name__)
 class ResponseEngine:
@@ -33,7 +33,7 @@ class ResponseEngine:
     def redis(self):
         if self._redis is None:
             try:
-                self._redis = get_redis()
+                self._redis = RedisClient.get_redis()
             except Exception as e:
                 logger.warning(f"[ResponseEngine] Failed to connect to Redis: {e}")
         return self._redis

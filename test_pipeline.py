@@ -244,7 +244,7 @@ def test_lgbm():
 
 def test_cnn():
     header("TEST 3 — Layer 2b: CNN Autoencoder (isolation)")
-    from anomly_detector. import CNNAnomalyDetector
+    from anomly_detector.cnn_detector import CNNAnomalyDetector
     from shared.schemas import RequestContext
 
     try:
@@ -301,7 +301,7 @@ def test_full_pipeline():
     from shared.schemas import RequestContext, LayerScore
     from shared.constants import LAYER_0, LAYER_1
     from firewall.decisions import FirewallDecision
-    from pipeline.regex_filter import RegexFilter
+    from firewall.regex_filter import RegexFilter
     from pipeline.layer2 import Layer2MLOrchestrator
     from response.engine import ResponseEngine
 
@@ -335,7 +335,7 @@ def test_full_pipeline():
 
         # Layer 0 — Static Firewall
         try:
-            from firewall.static_firewall import StaticFirewall
+            from firewall.engine import StaticFirewall
             fw_decision, fw_reason = StaticFirewall().inspect(req)
             if fw_decision == FirewallDecision.MITIGATE:
                 ctx.add_score(LayerScore.hard_block(LAYER_0, str(fw_reason), str(fw_reason)))
@@ -504,10 +504,10 @@ def test_score_fusion():
 
 def test_redis():
     header("TEST 6 — Redis Operations")
-    from utils.redis_client import get_redis
+    from utils.redis_client import RedisClient
 
     try:
-        r = get_redis()
+        r = RedisClient.get_redis()
     except Exception as e:
         fail(f"Redis connection failed: {e}")
         return False
@@ -571,7 +571,7 @@ def test_redis():
         failed += 1
 
     # Captcha
-    r.set_captcha_challenge(test_ip)
+    r.set_captcha_session(test_ip)
     if r.is_captcha_pending(test_ip):
         ok("Captcha challenge set")
         passed += 1

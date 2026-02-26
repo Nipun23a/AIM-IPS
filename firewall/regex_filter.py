@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 SQLI_HIGH = [
     (re.compile(r"union\s+(?:all\s+)?select\s+", re.I), 1.0, "UNION SELECT injection"),
     (re.compile(r"'\s*(?:or|and)\s+['\d].*?--", re.I), 1.0, "Tautology with comment"),
+    (re.compile(r"'[\s]*--", re.I), 1.0, "Quote-comment bypass"),
+    (re.compile(r"'[\s]*#", re.I), 1.0, "Quote-hash bypass"),
     (re.compile(r"(?:'\s*(?:or|and)\s+'\d+'='['\d]|'\s*or\s+\d+=\d+)", re.I), 1.0, "Classic OR/AND tautology"),
     (re.compile(r";\s*(?:drop|truncate|delete|insert|update|create|alter)\s+", re.I), 1.0, "Stacked query"),
     (re.compile(r"(?:sleep\s*\(\s*\d+|benchmark\s*\(\s*\d+|pg_sleep\s*\(\s*\d+|waitfor\s+delay)", re.I), 1.0, "Time-based blind injection"),

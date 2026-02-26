@@ -79,7 +79,7 @@ class LGBMAppClassifier:
 
             logger.debug(
                 f"[LGBMApp] {ctx.ip} -> label = {pred_label}"
-                f"score = {threat_score: ..3f} conf = {confidence:..3f}"
+                f"score = {threat_score:.3f} conf = {confidence:.3f}"
             )
 
             return LayerScore(

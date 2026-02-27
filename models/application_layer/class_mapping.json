@@ -1,0 +1,16 @@
+{
+  "class_to_idx": {
+    "cmdi": 0,
+    "norm": 1,
+    "path-traversal": 2,
+    "sqli": 3,
+    "xss": 4
+  },
+  "idx_to_class": {
+    "0": "cmdi",
+    "1": "norm",
+    "2": "path-traversal",
+    "3": "sqli",
+    "4": "xss"
+  }
+}

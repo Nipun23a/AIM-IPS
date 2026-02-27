@@ -26,7 +26,7 @@ dist/
 logs/
 *.log
 *.csv
-*.json
+
 
 # Keep empty logs dir but ignore contents
 !logs/

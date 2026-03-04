@@ -436,7 +436,7 @@ def test_score_fusion():
         },
         {
             "name":   "Low suspicion → DELAY",
-            "scores": {"regex": 0.3, "lgbm": 0.3, "cnn": 0.2, "net": 0.0},
+            "scores": {"regex": 0.35, "lgbm": 0.35, "cnn": 0.25, "net": 0.0},
             "expect": "DELAY",
         },
         {

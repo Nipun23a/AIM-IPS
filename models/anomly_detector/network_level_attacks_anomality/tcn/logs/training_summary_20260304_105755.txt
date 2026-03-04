@@ -1,0 +1,19 @@
+======================================================================
+TCN TFLITE — TRAINING SUMMARY
+======================================================================
+Timestamp    : 20260304_105755
+Input dim    : 79
+Train samples: 713,786
+Val   samples: 178,447
+Test  samples: 223,059
+FP32 TFLite  : /home/nipuna/Desktop/AIM-IPS/models/anomly_detector/network_level_attacks_anomality/tcn/models/tcn_fp32.tflite
+INT8 TFLite  : /home/nipuna/Desktop/AIM-IPS/models/anomly_detector/network_level_attacks_anomality/tcn/models/tcn_int8.tflite
+
+Keras Test Performance:
+  Accuracy                 : 100.0000%
+  Precision                : 100.0000%
+  Recall                   : 100.0000%
+  F1-Score                 : 100.0000%
+  AUC-ROC                  : 100.0000%
+  False Positive Rate      : 0.0000%
+  Detection Rate           : 100.0000%

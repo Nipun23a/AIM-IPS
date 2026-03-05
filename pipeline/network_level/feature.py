@@ -25,9 +25,9 @@ FLOW_TIMEOUT_SECONDS = 30
 MIN_PACKETS_PER_FLOW = 4
 MAX_FLOW_DURATION = 120
 
-LABEL_BENIGN   = "BENIGN"
-LABEL_DDOS     = "DDoS"
-LABEL_PORTSCAN = "PortScan"
+LABEL_BENIGN   = "benign"
+LABEL_DDOS     = "ddos"
+LABEL_PORTSCAN = "portscan"
 LABEL_BOTNET   = "Bot"
 LABEL_ZERODAY  = "ZeroDay"
 LABEL_CLEAN    = "clean"
@@ -38,3 +38,4 @@ LGBM_FEATURES_PATH = "models/threat_classifier/features.pkl"
 TCN_TFLITE_PATH    = "models/anomly_detector/network_level_attacks_anomality/tcn/models/tcn_fp32.tflite"
 TCN_SCALER_PATH    = "models/anomly_detector/network_level_attacks_anomality/scaler.pkl"
 TCN_FEATURES_PATH  = "models/anomly_detector/network_level_attacks_anomality/feature_info.pkl"
+

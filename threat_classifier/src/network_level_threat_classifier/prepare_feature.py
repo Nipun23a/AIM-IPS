@@ -1,5 +1,5 @@
 import pandas as pd
-from threat_classifier.src.features import THREAT_FEATURES
+from threat_classifier.src.network_level_threat_classifier.features import THREAT_FEATURES
 
 def prepare_threat_features(paths):
     dfs = []

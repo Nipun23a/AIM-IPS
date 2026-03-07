@@ -1,0 +1,19 @@
+======================================================================
+AUTOENCODER — TRAINING SUMMARY
+======================================================================
+Timestamp        : 20260307_150742
+Input dim        : 16
+Train samples    : 1,930,622  (BENIGN only)
+Val   samples    : 340,698  (BENIGN only)
+Attack samples   : 540,497
+Threshold        : 0.511380  (p99.0 of benign MSE)
+FP32 TFLite      : /home/nipuna/Desktop/AIM-IPS/models/anomly_detector/network_level_attacks_anomality/autoencoder/models/autoencoder_fp32.tflite
+INT8 TFLite      : /home/nipuna/Desktop/AIM-IPS/models/anomly_detector/network_level_attacks_anomality/autoencoder/models/autoencoder_int8.tflite
+
+Keras Evaluation:
+  Accuracy                 : 64.7820%
+  F1-Score                 : 60.0834%
+  AUC-ROC                  : 80.6023%
+  False Positive Rate      : 1.0000%
+  False Negative Rate      : 56.7870%
+  Detection Rate           : 43.2130%

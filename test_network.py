@@ -12,11 +12,16 @@ Run from project root:
     python test_network.py
 
 No Scapy capture, no root, no real traffic needed.
+Real flows are loaded from: data_collector/data_sets/cicids/
 """
 
 import sys
 import time
+import random
 import numpy as np
+import pandas as pd
+from pathlib import Path
+
 sys.path.insert(0, ".")
 
 GREEN  = "\033[92m"
@@ -34,135 +39,281 @@ def header(msg): print(f"\n{BOLD}{msg}{RESET}\n" + "─"*60)
 
 
 # ─────────────────────────────────────────────────────────────
-# SYNTHETIC FLOW DEFINITIONS
-# Built from known CICIDS2017 feature distributions.
-# Each has an expected classification.
+# CICIDS COLUMN → THREAT_FEATURES mapping
+#
+# The CSV uses mixed-case / spaced column names.
+# THREAT_FEATURES uses lowercase with spaces.
+# We normalise CSV headers to lowercase+stripped to match.
 # ─────────────────────────────────────────────────────────────
 
-SYNTHETIC_FLOWS = [
+THREAT_FEATURES = [
+    "flow duration",
+    "total fwd packets",
+    "total backward packets",
+    "total length of fwd packets",
+    "total length of bwd packets",
+    "fwd packet length mean",
+    "bwd packet length mean",
+    "flow bytes/s",
+    "flow packets/s",
+    "syn flag count",
+    "ack flag count",
+    "psh flag count",
+    "packet length mean",
+    "packet length std",
+    "idle mean",
+    "idle std",
+]
+
+# How many real flows to sample per label class for the pipeline tests
+FLOWS_PER_CLASS = 3
+
+# Dataset directory (relative to project root)
+CICIDS_DIR = Path("data_collector/data_sets/cicids")
+
+# ─────────────────────────────────────────────────────────────
+# NETWORK-LEVEL LABEL WHITELIST
+#
+# CICIDS contains both network-layer and application-layer attacks.
+# We keep only labels that correspond to what the network classifier
+# actually detects (LightGBM classes: benign / ddos / portscan,
+# plus botnet which is also network-layer).
+#
+# Excluded (application-layer, handled by app-layer IPS):
+#   web attack – brute force / sql injection / xss
+#   ftp-patator, ssh-patator  (credential brute-force)
+#   infiltration, heartbleed  (application exploits)
+# ─────────────────────────────────────────────────────────────
+
+NETWORK_LEVEL_LABELS = {
+    "benign",
+    "ddos",
+    "portscan",
+    "bot",       # Botnet C&C beaconing — network layer
+}
+
+def _is_network_level(expected: str) -> bool:
+    """Return True only for labels the network classifier handles."""
+    return expected.lower() in NETWORK_LEVEL_LABELS
+
+
+# ─────────────────────────────────────────────────────────────
+# DATASET LOADER
+# ─────────────────────────────────────────────────────────────
+
+def _normalise_cols(df: pd.DataFrame) -> pd.DataFrame:
+    """Lowercase + strip all column names so they match THREAT_FEATURES."""
+    df.columns = df.columns.str.strip().str.lower()
+    return df
+
+
+def _label_to_expected(raw_label: str) -> str:
+    """
+    Map raw CICIDS label string to the classifier's output labels.
+    Returns one of: 'benign' | 'ddos' | 'portscan' | <other-attack>
+    """
+    lbl = raw_label.strip().lower()
+    if lbl == "benign":
+        return "BENIGN"
+    if "ddos" in lbl or "dos" in lbl:
+        return "ddos"
+    if "portscan" in lbl or "port scan" in lbl:
+        return "portscan"
+    return lbl  # bot, infiltration, webattack, etc.
+
+
+def load_cicids_flows(
+    cicids_dir: Path = CICIDS_DIR,
+    flows_per_class: int = FLOWS_PER_CLASS,
+    seed: int = 42,
+) -> list:
+    """
+    Load real flows from CICIDS CSV files.
+
+    Scans all *.csv files in cicids_dir, normalises column names,
+    maps to THREAT_FEATURES, and returns a list of dicts matching
+    the SYNTHETIC_FLOWS schema used by the test suite:
+
+        {
+            "name":     str,
+            "src_ip":   str,      # synthetic — "cicids:<label>:<row_idx>"
+            "expected": str,      # BENIGN | ddos | portscan | …
+            "features": dict,     # {feature_name: float, …}
+        }
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+
+    csv_files = sorted(cicids_dir.glob("*.csv"))
+    if not csv_files:
+        raise FileNotFoundError(
+            f"No CSV files found in {cicids_dir.resolve()}\n"
+            "Expected layout: data_collector/data_sets/cicids/*.csv"
+        )
+
+    print(f"  {CYAN}→{RESET} Found {len(csv_files)} CSV file(s) in {cicids_dir}")
+
+    # ── Read all files, collect rows per label ────────────────
+    label_buckets: dict = {}   # label_str → list of feature-dicts
+
+    LABEL_COL_CANDIDATES = ["label", "attack_cat", "attack_category",
+                             "attack", "class"]
+
+    for csv_path in csv_files:
+        try:
+            df = pd.read_csv(csv_path, low_memory=False)
+        except Exception as e:
+            warn(f"  Could not read {csv_path.name}: {e}")
+            continue
+
+        df = _normalise_cols(df)
+
+        # Find label column
+        label_col = None
+        for c in LABEL_COL_CANDIDATES:
+            if c in df.columns:
+                label_col = c
+                break
+        if label_col is None:
+            warn(f"  No label column in {csv_path.name} — skipping")
+            continue
+
+        # Check all THREAT_FEATURES are present
+        missing_feats = [f for f in THREAT_FEATURES if f not in df.columns]
+        if missing_feats:
+            warn(f"  {csv_path.name} missing features: {missing_feats[:5]}{'…' if len(missing_feats)>5 else ''} — skipping")
+            continue
+
+        # Drop rows with NaN/Inf in feature columns
+        feat_df = df[THREAT_FEATURES].copy()
+        feat_df.replace([np.inf, -np.inf], np.nan, inplace=True)
+        mask = ~feat_df.isnull().any(axis=1)
+        feat_df = feat_df[mask]
+        labels  = df[label_col][mask].astype(str)
+
+        kept_labels    = []
+        skipped_labels = []
+        for raw_lbl in labels.unique():
+            expected = _label_to_expected(raw_lbl)
+            if not _is_network_level(expected):
+                skipped_labels.append(raw_lbl.strip())
+                continue
+            rows = feat_df[labels == raw_lbl]
+            if rows.empty:
+                continue
+            if expected not in label_buckets:
+                label_buckets[expected] = []
+            for _, row in rows.iterrows():
+                label_buckets[expected].append(row.to_dict())
+            kept_labels.append(raw_lbl.strip())
+
+        info(f"  {csv_path.name} — kept: {kept_labels or ['(none)']} | "
+             f"skipped (app-layer): {skipped_labels or ['(none)']}")
+
+    if not label_buckets:
+        raise RuntimeError(
+            "Could not extract any flows from the CICIDS dataset.\n"
+            "Check that the CSV files contain the required feature columns."
+        )
+
+    # ── Sample flows_per_class rows per label ─────────────────
+    flows = []
+    for expected, rows in sorted(label_buckets.items()):
+        sample_n = min(flows_per_class, len(rows))
+        sampled  = random.sample(rows, sample_n)
+        for i, feat_dict in enumerate(sampled):
+            # Coerce to float, replace any remaining NaN/Inf with 0
+            clean = {}
+            for k, v in feat_dict.items():
+                try:
+                    fv = float(v)
+                    clean[k] = 0.0 if (np.isnan(fv) or np.isinf(fv)) else fv
+                except (TypeError, ValueError):
+                    clean[k] = 0.0
+
+            flows.append({
+                "name":     f"{expected} (row {i})",
+                "src_ip":   f"cicids:{expected}:{i}",
+                "expected": expected,
+                "features": clean,
+            })
+
+    # Shuffle so benign and attacks are interleaved
+    random.shuffle(flows)
+    return flows
+
+
+# ─────────────────────────────────────────────────────────────
+# Lazy-load FLOWS — only parsed once
+# ─────────────────────────────────────────────────────────────
+
+_FLOWS_CACHE: list = []
+
+def get_flows() -> list:
+    global _FLOWS_CACHE
+    if not _FLOWS_CACHE:
+        header("Loading Real CICIDS Flows")
+        try:
+            _FLOWS_CACHE = load_cicids_flows()
+        except FileNotFoundError as e:
+            warn(str(e))
+            warn("Falling back to SYNTHETIC_FLOWS")
+            _FLOWS_CACHE = SYNTHETIC_FLOWS_FALLBACK
+    return _FLOWS_CACHE
+
+
+# ─────────────────────────────────────────────────────────────
+# FALLBACK synthetic flows (used only if dataset is absent)
+# ─────────────────────────────────────────────────────────────
+
+SYNTHETIC_FLOWS_FALLBACK = [
     {
-        "name":     "Normal web browsing",
+        "name":     "Normal web browsing (synthetic)",
         "src_ip":   "192.168.1.100",
         "expected": "BENIGN",
         "features": {
-            "flow duration":                  2.5,
-            "total fwd packets":              8,
-            "total backward packets":         6,
-            "total length of fwd packets":    1200,
-            "total length of bwd packets":    8000,
-            "fwd packet length mean":         150.0,
-            "bwd packet length mean":         1333.0,
-            "flow bytes/s":                   3680.0,
-            "flow packets/s":                 5.6,
-            "syn flag count":                 1,
-            "ack flag count":                 12,
-            "psh flag count":                 4,
-            "packet length mean":             654.0,
-            "packet length std":              580.0,
-            "idle mean":                      0.1,
-            "idle std":                       0.05,
+            "flow duration": 2.5, "total fwd packets": 8,
+            "total backward packets": 6, "total length of fwd packets": 1200,
+            "total length of bwd packets": 8000, "fwd packet length mean": 150.0,
+            "bwd packet length mean": 1333.0, "flow bytes/s": 3680.0,
+            "flow packets/s": 5.6, "syn flag count": 1, "ack flag count": 12,
+            "psh flag count": 4, "packet length mean": 654.0,
+            "packet length std": 580.0, "idle mean": 0.1, "idle std": 0.05,
         },
     },
     {
-        "name":     "Normal HTTPS session",
-        "src_ip":   "192.168.1.101",
-        "expected": "BENIGN",
+        "name":     "DDoS SYN flood (synthetic)",
+        "src_ip":   "10.0.0.50",
+        "expected": "ddos",
         "features": {
-            "flow duration":                  5.0,
-            "total fwd packets":              15,
-            "total backward packets":         12,
-            "total length of fwd packets":    2000,
-            "total length of bwd packets":    15000,
-            "fwd packet length mean":         133.0,
-            "bwd packet length mean":         1250.0,
-            "flow bytes/s":                   3400.0,
-            "flow packets/s":                 5.4,
-            "syn flag count":                 1,
-            "ack flag count":                 25,
-            "psh flag count":                 8,
-            "packet length mean":             629.0,
-            "packet length std":              560.0,
-            "idle mean":                      0.2,
-            "idle std":                       0.1,
+            "flow duration": 2.0, "total fwd packets": 5000,
+            "total backward packets": 0, "total length of fwd packets": 300000,
+            "total length of bwd packets": 0, "fwd packet length mean": 60.0,
+            "bwd packet length mean": 0.0, "flow bytes/s": 150000.0,
+            "flow packets/s": 2500.0, "syn flag count": 5000, "ack flag count": 0,
+            "psh flag count": 0, "packet length mean": 60.0,
+            "packet length std": 2.0, "idle mean": 0.0, "idle std": 0.0,
         },
     },
-    
     {
-    "name":     "DDoS SYN flood",
-    "src_ip":   "10.0.0.50",
-    "expected": "ddos",
-    "features": {
-        "flow duration":                  2.0,
-        "total fwd packets":              5000,
-        "total backward packets":         0,
-        "total length of fwd packets":    300000,
-        "total length of bwd packets":    0,
-        "fwd packet length mean":         60.0,
-        "bwd packet length mean":         0.0,
-        "flow bytes/s":                   150000.0,   # ← was 80,000,000
-        "flow packets/s":                 2500.0,     # ← was 1,000,000
-        "syn flag count":                 5000,
-        "ack flag count":                 0,
-        "psh flag count":                 0,
-        "packet length mean":             60.0,
-        "packet length std":              2.0,
-        "idle mean":                      0.0,
-        "idle std":                       0.0,
+        "name":     "Port Scan (synthetic)",
+        "src_ip":   "10.0.0.51",
+        "expected": "portscan",
+        "features": {
+            "flow duration": 0.5, "total fwd packets": 5,
+            "total backward packets": 1, "total length of fwd packets": 300,
+            "total length of bwd packets": 60, "fwd packet length mean": 60.0,
+            "bwd packet length mean": 60.0, "flow bytes/s": 720.0,
+            "flow packets/s": 12.0, "syn flag count": 4, "ack flag count": 1,
+            "psh flag count": 0, "packet length mean": 60.0,
+            "packet length std": 0.0, "idle mean": 0.0, "idle std": 0.0,
+        },
     },
-},
-{
-    "name":     "DDoS UDP flood",
-    "src_ip":   "10.0.0.53",
-    "expected": "ddos",
-    "features": {
-        "flow duration":                  1.0,
-        "total fwd packets":              3000,
-        "total backward packets":         0,
-        "total length of fwd packets":    360000,
-        "total length of bwd packets":    0,
-        "fwd packet length mean":         120.0,
-        "bwd packet length mean":         0.0,
-        "flow bytes/s":                   360000.0,   # ← was 960,000
-        "flow packets/s":                 3000.0,     # ← was 8,000
-        "syn flag count":                 0,
-        "ack flag count":                 0,
-        "psh flag count":                 0,
-        "packet length mean":             120.0,
-        "packet length std":              5.0,
-        "idle mean":                      0.0,
-        "idle std":                       0.0,
-    },
-},
-{
-    "name":     "Port Scan",
-    "src_ip":   "10.0.0.51",
-    "expected": "portscan",
-    "features": {
-        "flow duration":                  0.5,
-        "total fwd packets":              5,          # ← was 1 (below MIN threshold)
-        "total backward packets":         1,
-        "total length of fwd packets":    300,
-        "total length of bwd packets":    60,
-        "fwd packet length mean":         60.0,
-        "bwd packet length mean":         60.0,
-        "flow bytes/s":                   720.0,
-        "flow packets/s":                 12.0,
-        "syn flag count":                 4,          # multiple SYNs = key signal
-        "ack flag count":                 1,
-        "psh flag count":                 0,
-        "packet length mean":             60.0,
-        "packet length std":              0.0,
-        "idle mean":                      0.0,
-        "idle std":                       0.0,
-    },
-},
 ]
 
 
 # ─────────────────────────────────────────────────────────────
 # TEST 1 — FEATURE EXTRACTOR
-# Builds synthetic Scapy-like packets and verifies all 16
-# CICIDS features are extracted correctly
 # ─────────────────────────────────────────────────────────────
 
 def test_feature_extractor():
@@ -170,27 +321,24 @@ def test_feature_extractor():
     from pipeline.network_level.flow_acuumulator import (
         Flow, PacketRecord, extract_flow_features
     )
-    from pipeline.network_level.feature import THREAT_FEATURES
+    from pipeline.network_level.feature import THREAT_FEATURES as MODEL_FEATURES
 
     passed = 0
     failed = 0
 
-    # Build a synthetic flow with known packets
     flow = Flow(src_ip="10.0.0.99", start_time=1000.0)
 
-    # Add 10 synthetic packets: 6 fwd, 4 bwd, with TCP flags
     packets = [
-        # (timestamp, length, direction, flags)
-        (1000.00, 66,   "fwd", 0x02),  # SYN
-        (1000.01, 66,   "bwd", 0x12),  # SYN+ACK
-        (1000.02, 54,   "fwd", 0x10),  # ACK
-        (1000.10, 500,  "fwd", 0x18),  # PSH+ACK
-        (1000.15, 1400, "bwd", 0x10),  # ACK (data)
-        (1000.20, 500,  "fwd", 0x18),  # PSH+ACK
-        (1000.25, 1400, "bwd", 0x10),  # ACK (data)
-        (1001.50, 200,  "fwd", 0x18),  # PSH+ACK (after idle gap)
-        (1001.55, 800,  "bwd", 0x10),  # ACK (data)
-        (1001.60, 54,   "fwd", 0x11),  # FIN+ACK
+        (1000.00, 66,   "fwd", 0x02),
+        (1000.01, 66,   "bwd", 0x12),
+        (1000.02, 54,   "fwd", 0x10),
+        (1000.10, 500,  "fwd", 0x18),
+        (1000.15, 1400, "bwd", 0x10),
+        (1000.20, 500,  "fwd", 0x18),
+        (1000.25, 1400, "bwd", 0x10),
+        (1001.50, 200,  "fwd", 0x18),
+        (1001.55, 800,  "bwd", 0x10),
+        (1001.60, 54,   "fwd", 0x11),
     ]
 
     for ts, length, direction, flags in packets:
@@ -199,17 +347,14 @@ def test_feature_extractor():
 
     features = extract_flow_features(flow)
 
-    # Verify feature dict exists
     if features is None:
         fail("extract_flow_features returned None")
-        failed += 1
         return False
 
     ok(f"Feature dict returned ({len(features)} features)")
     passed += 1
 
-    # Verify all 16 features present
-    missing = [f for f in THREAT_FEATURES if f not in features]
+    missing = [f for f in MODEL_FEATURES if f not in features]
     if missing:
         fail(f"Missing features: {missing}")
         failed += 1
@@ -217,22 +362,21 @@ def test_feature_extractor():
         ok("All 16 THREAT_FEATURES present")
         passed += 1
 
-    # Verify specific values
     checks = [
-        ("flow duration",            lambda v: abs(v - 1.60) < 0.01,      "≈1.60s"),
-        ("total fwd packets",        lambda v: v == 6,                    "== 6"),
-        ("total backward packets",   lambda v: v == 4,                    "== 4"),
-        ("syn flag count",           lambda v: v >= 1,                    ">= 1 (SYN+SYNACK both have SYN bit set)"),
-        ("ack flag count",           lambda v: v >= 6,                    ">= 6"),
-        ("psh flag count",           lambda v: v == 3,                    "== 3"),
-        ("flow bytes/s",             lambda v: v > 0,                     "> 0"),
-        ("flow packets/s",           lambda v: v > 0,                     "> 0"),
-        ("idle mean",                lambda v: v > 0,                     "> 0 (gap detected)"),
-        ("packet length std",        lambda v: v > 0,                     "> 0"),
+        ("flow duration",          lambda v: abs(v - 1.60 * 1_000_000) < 10_000, "≈1.60s (in µs)"),
+        ("total fwd packets",      lambda v: v == 6,                              "== 6"),
+        ("total backward packets", lambda v: v == 4,                              "== 4"),
+        ("syn flag count",         lambda v: v >= 1,                              ">= 1"),
+        ("ack flag count",         lambda v: v >= 6,                              ">= 6"),
+        ("psh flag count",         lambda v: v == 3,                              "== 3"),
+        ("flow bytes/s",           lambda v: v > 0,                               "> 0"),
+        ("flow packets/s",         lambda v: v > 0,                               "> 0"),
+        ("idle mean",              lambda v: v > 0,                               "> 0 (gap detected)"),
+        ("packet length std",      lambda v: v > 0,                               "> 0"),
     ]
 
     for feat_name, check_fn, description in checks:
-        val = features.get(feat_name, None)
+        val = features.get(feat_name)
         if val is not None and check_fn(val):
             ok(f"{feat_name} = {val:.3f}  {description}")
             passed += 1
@@ -240,9 +384,8 @@ def test_feature_extractor():
             fail(f"{feat_name} = {val}  expected {description}")
             failed += 1
 
-    # Print all features for visibility
     print(f"\n  {CYAN}All extracted features:{RESET}")
-    for feat in THREAT_FEATURES:
+    for feat in MODEL_FEATURES:
         print(f"    {feat:40s}: {features[feat]:.4f}")
 
     print(f"\n  Results: {GREEN}{passed} passed{RESET} | {RED}{failed} failed{RESET}")
@@ -254,7 +397,7 @@ def test_feature_extractor():
 # ─────────────────────────────────────────────────────────────
 
 def test_lgbm_network():
-    header("TEST 2 — LightGBM Network Classifier")
+    header("TEST 2 — LightGBM Network Classifier (real CICIDS flows)")
     from pipeline.network_level.lgbm_network_classifier import LGBMNetworkClassifier
 
     try:
@@ -262,12 +405,13 @@ def test_lgbm_network():
     except FileNotFoundError as e:
         warn(f"Model not found: {e}")
         warn("Skipping — place model at models/network_layer/network_lgbm.pkl")
-        return True  # not a failure — model just not present yet
+        return True
 
+    flows = get_flows()
     passed = 0
     failed = 0
 
-    for flow in SYNTHETIC_FLOWS:
+    for flow in flows:
         label, confidence, all_probs = lgbm.predict(flow["features"])
         threat_score = lgbm.threat_score(flow["features"])
         expected = flow["expected"]
@@ -277,21 +421,14 @@ def test_lgbm_network():
             for k, v in sorted(all_probs.items(), key=lambda x: -x[1])
         )
 
-        # Model classes are lowercase (benign/ddos/portscan)
-        # Normalize both to lowercase for comparison
         label_lower    = label.lower()
         expected_lower = expected.lower()
-
-        is_correct = (
-            label_lower == expected_lower or
-            (expected_lower != "benign" and label_lower != "benign")
-        )
 
         if label_lower == expected_lower:
             ok(f"{flow['name']} → {BOLD}{label}{RESET} (score={threat_score:.3f})")
             info(f"   {probs_str}")
             passed += 1
-        elif is_correct:
+        elif expected_lower != "benign" and label_lower != "benign":
             warn(f"{flow['name']} → {label} (expected {expected}, but attack detected)")
             info(f"   {probs_str}")
             passed += 1
@@ -309,7 +446,7 @@ def test_lgbm_network():
 # ─────────────────────────────────────────────────────────────
 
 def test_tcn():
-    header("TEST 3 — TCN Zero-Day Detector")
+    header("TEST 3 — TCN Zero-Day Detector (real CICIDS flows)")
     from pipeline.network_level.tcn_detector import TCNDetector
 
     try:
@@ -319,15 +456,15 @@ def test_tcn():
         warn("Skipping — place model at models/network_layer/network_tcn.tflite")
         return True
 
+    flows = get_flows()
     passed = 0
     failed = 0
 
-    for flow in SYNTHETIC_FLOWS:
+    for flow in flows:
         score    = tcn.predict(flow["features"])
         is_anom  = tcn.is_anomaly(score)
         expected = flow["expected"]
-
-        expected_anom = expected != "BENIGN"
+        expected_anom = expected.upper() != "BENIGN"
 
         if expected_anom and is_anom:
             ok(f"{flow['name']} → anomaly detected (score={score:.3f})")
@@ -346,30 +483,28 @@ def test_tcn():
 
 # ─────────────────────────────────────────────────────────────
 # TEST 4 — SCORE FUSION
-# Verify WEIGHT_NET_LGBM + WEIGHT_NET_TCN fusion math
 # ─────────────────────────────────────────────────────────────
 
 def test_score_fusion():
     header("TEST 4 — Network Score Fusion")
     from pipeline.network_level.network_classifier import NetworkClassifier
-    from shared.constants import WEIGHT_NETWORK_LGBM,WEIGHT_NETWORK_TCN
+    from shared.constants import WEIGHT_NETWORK_LGBM, WEIGHT_NETWORK_TCN
 
-    info(f"Fusion weights: LGBM={WEIGHT_NETWORK_LGBM} TCN={WEIGHT_NETWORK_TCN} sum={WEIGHT_NETWORK_TCN+WEIGHT_NETWORK_LGBM}")
+    info(f"Fusion weights: LGBM={WEIGHT_NETWORK_LGBM} TCN={WEIGHT_NETWORK_TCN} "
+         f"sum={WEIGHT_NETWORK_TCN + WEIGHT_NETWORK_LGBM}")
 
-    # Verify weights sum to 1.0
     weight_sum = WEIGHT_NETWORK_LGBM + WEIGHT_NETWORK_TCN
     if abs(weight_sum - 1.0) < 1e-6:
         ok(f"Weights sum to 1.0 ✓")
     else:
         fail(f"Weights sum to {weight_sum} (expected 1.0)")
 
-    # Test fusion math manually
     fusion_cases = [
-        {"lgbm": 0.0,  "tcn": 0.0,  "expected_range": (0.0,  0.1),  "label": "clean"},
-        {"lgbm": 1.0,  "tcn": 1.0,  "expected_range": (0.9,  1.0),  "label": "clear attack"},
-        {"lgbm": 0.9,  "tcn": 0.0,  "expected_range": (0.45, 0.60), "label": "lgbm only"},
-        {"lgbm": 0.0,  "tcn": 0.9,  "expected_range": (0.35, 0.45), "label": "tcn only"},
-        {"lgbm": 0.8,  "tcn": 0.7,  "expected_range": (0.70, 0.80), "label": "both high"},
+        {"lgbm": 0.0, "tcn": 0.0, "expected_range": (0.0,  0.1),  "label": "clean"},
+        {"lgbm": 1.0, "tcn": 1.0, "expected_range": (0.9,  1.0),  "label": "clear attack"},
+        {"lgbm": 0.9, "tcn": 0.0, "expected_range": (0.45, 0.60), "label": "lgbm only"},
+        {"lgbm": 0.0, "tcn": 0.9, "expected_range": (0.35, 0.45), "label": "tcn only"},
+        {"lgbm": 0.8, "tcn": 0.7, "expected_range": (0.70, 0.80), "label": "both high"},
     ]
 
     passed = 0
@@ -378,7 +513,6 @@ def test_score_fusion():
     for fc in fusion_cases:
         fused = WEIGHT_NETWORK_LGBM * fc["lgbm"] + WEIGHT_NETWORK_TCN * fc["tcn"]
         lo, hi = fc["expected_range"]
-
         if lo <= fused <= hi:
             ok(f"{fc['label']:20s} lgbm={fc['lgbm']} tcn={fc['tcn']} → fused={fused:.3f} ∈ [{lo},{hi}]")
             passed += 1
@@ -392,22 +526,19 @@ def test_score_fusion():
 
 # ─────────────────────────────────────────────────────────────
 # TEST 5 — FULL PIPELINE SIMULATION (no root needed)
-# Injects flows → classifier → Redis write
 # ─────────────────────────────────────────────────────────────
 
 def test_full_pipeline_simulation():
-    header("TEST 5 — Full Pipeline Simulation (no root)")
+    header("TEST 5 — Full Pipeline Simulation (real CICIDS flows, no root)")
     from pipeline.network_level.network_ips import NetworkLayerIPS
 
     ips = NetworkLayerIPS()
 
-    flows = [
-        (flow["src_ip"], flow["features"])
-        for flow in SYNTHETIC_FLOWS
-    ]
+    real_flows = get_flows()
+    flows_input = [(f["src_ip"], f["features"]) for f in real_flows]
 
     try:
-        results = ips.simulate(flows=flows)
+        results = ips.simulate(flows=flows_input)
     except Exception as e:
         fail(f"Simulation failed: {e}")
         import traceback
@@ -417,47 +548,51 @@ def test_full_pipeline_simulation():
     passed = 0
     failed = 0
 
-    for i, (result, flow_def) in enumerate(zip(results, SYNTHETIC_FLOWS)):
-        expected = flow_def["expected"]
-        name     = flow_def["name"]
+    # Print summary header
+    print(f"\n  {'Flow':<35} {'Expected':<12} {'Got':<12} {'Fused':>7} {'LGBM':>7} {'TCN':>7}  Redis")
+    print(f"  {'─'*35} {'─'*12} {'─'*12} {'─'*7} {'─'*7} {'─'*7}  ─────")
 
-        is_threat    = result["is_threat"]
-        attack_type  = result["attack_type"]
-        fused        = result["fused_score"]
-        lgbm         = result["lgbm_score"]
-        tcn          = result["tcn_score"]
-        redis_ok     = result["redis_written"]
+    for result, flow_def in zip(results, real_flows):
+        expected      = flow_def["expected"]
+        name          = flow_def["name"]
+        is_threat     = result["is_threat"]
+        attack_type   = result["attack_type"]
+        fused         = result["fused_score"]
+        lgbm          = result["lgbm_score"]
+        tcn           = result["tcn_score"]
+        redis_ok      = result["redis_written"]
 
-        expected_threat = expected != "BENIGN"
+        expected_threat = expected.upper() != "BENIGN"
+        threat_correct  = is_threat == expected_threat or (not expected_threat and fused < 0.5)
 
-        threat_correct = (is_threat == expected_threat) or (
-            not expected_threat and fused < 0.5
+        status_sym   = f"{GREEN}✓{RESET}" if threat_correct else f"{RED}✗{RESET}"
+        redis_str    = f"{GREEN}✓{RESET}" if redis_ok else f"{YELLOW}✗{RESET}"
+        threat_label = f"{RED}THREAT{RESET}" if is_threat else f"{GREEN}CLEAN {RESET}"
+
+        # Truncate long names for display
+        short_name = name[:33] + ".." if len(name) > 35 else name
+
+        print(
+            f"  {status_sym} {short_name:<35} "
+            f"{expected:<12} {attack_type:<12} "
+            f"{fused:>7.3f} {lgbm:>7.3f} {tcn:>7.3f}  {redis_str}"
         )
 
         if threat_correct:
-            status = f"{GREEN}✓{RESET}"
             passed += 1
         else:
-            status = f"{RED}✗{RESET}"
             failed += 1
 
-        threat_str = f"{RED}THREAT{RESET}" if is_threat else f"{GREEN}CLEAN{RESET}"
-        redis_str  = f"{GREEN}✓{RESET}" if redis_ok else f"{YELLOW}✗ (Redis unavailable){RESET}"
-
-        print(
-            f"  {status} {name}\n"
-            f"      {threat_str} | type={attack_type:12s} | "
-            f"fused={fused:.3f} | lgbm={lgbm:.3f} | tcn={tcn:.3f} | "
-            f"redis={redis_str}"
-        )
-
-    print(f"\n  Results: {GREEN}{passed} passed{RESET} | {RED}{failed} failed{RESET}")
+    # Accuracy summary
+    total = passed + failed
+    acc = passed / total * 100 if total > 0 else 0
+    print(f"\n  Accuracy: {acc:.1f}% ({passed}/{total})")
+    print(f"  Results: {GREEN}{passed} passed{RESET} | {RED}{failed} failed{RESET}")
     return failed == 0
 
 
 # ─────────────────────────────────────────────────────────────
 # TEST 6 — REDIS INTEGRATION
-# Verify network scores are written and readable
 # ─────────────────────────────────────────────────────────────
 
 def test_redis_integration():
@@ -478,70 +613,39 @@ def test_redis_integration():
     failed = 0
 
     test_cases = [
-        {
-            "ip":          "10.0.0.50",
-            "score":       0.95,
-            "net_lgbm":    0.98,
-            "tcn":         0.91,
-            "attack_type": "DDoS",
-        },
-        {
-            "ip":          "10.0.0.51",
-            "score":       0.78,
-            "net_lgbm":    0.80,
-            "tcn":         0.75,
-            "attack_type": "PortScan",
-        },
-        {
-            "ip":          "192.168.1.100",
-            "score":       0.02,
-            "net_lgbm":    0.01,
-            "tcn":         0.03,
-            "attack_type": "clean",
-        },
+        {"ip": "10.0.0.50", "score": 0.95, "net_lgbm": 0.98, "tcn": 0.91, "attack_type": "DDoS"},
+        {"ip": "10.0.0.51", "score": 0.78, "net_lgbm": 0.80, "tcn": 0.75, "attack_type": "PortScan"},
+        {"ip": "192.168.1.100", "score": 0.02, "net_lgbm": 0.01, "tcn": 0.03, "attack_type": "clean"},
     ]
 
     for tc in test_cases:
         ip = tc["ip"]
-
-        # Write
         ok_write = r.set_network_threat_score(
-            ip          = ip,
-            score       = tc["score"],
-            net_lgbm    = tc["net_lgbm"],
-            tcn         = tc["tcn"],
-            attack_type = tc["attack_type"],
+            ip=ip, score=tc["score"], net_lgbm=tc["net_lgbm"],
+            tcn=tc["tcn"], attack_type=tc["attack_type"],
         )
-
         if not ok_write:
             fail(f"Write failed for {ip}")
             failed += 1
             continue
 
-        # Read back
         data = r.get_network_threat_score(ip)
         if data is None:
             fail(f"Read returned None for {ip}")
             failed += 1
             continue
 
-        # Verify score
         score_ok = abs(data["score"] - tc["score"]) < 0.001
         type_ok  = data.get("attack_type") == tc["attack_type"]
 
         if score_ok and type_ok:
-            ok(
-                f"{ip:16s} | type={data['attack_type']:12s} | "
-                f"score={data['score']:.3f} | "
-                f"lgbm={data.get('net_lgbm', 0):.3f} | "
-                f"tcn={data.get('tcn', 0):.3f}"
-            )
+            ok(f"{ip:16s} | type={data['attack_type']:12s} | score={data['score']:.3f} | "
+               f"lgbm={data.get('net_lgbm', 0):.3f} | tcn={data.get('tcn', 0):.3f}")
             passed += 1
         else:
             fail(f"{ip} score_ok={score_ok} type_ok={type_ok} data={data}")
             failed += 1
 
-    # Test convenience method
     val = r.get_network_score_value("10.0.0.50")
     if abs(val - 0.95) < 0.001:
         ok(f"get_network_score_value = {val:.3f} ✓")
@@ -550,12 +654,72 @@ def test_redis_integration():
         fail(f"get_network_score_value = {val} expected 0.95")
         failed += 1
 
-    # Cleanup
     for tc in test_cases:
         r.raw.delete(f"threat:ip:{tc['ip']}")
 
     print(f"\n  Results: {GREEN}{passed} passed{RESET} | {RED}{failed} failed{RESET}")
     return failed == 0
+
+
+# ─────────────────────────────────────────────────────────────
+# TEST 7 — DATASET LOADER SELF-TEST
+# Verifies the CICIDS loader works and reports class distribution
+# ─────────────────────────────────────────────────────────────
+
+def test_dataset_loader():
+    header("TEST 7 — CICIDS Dataset Loader")
+
+    try:
+        flows = load_cicids_flows(flows_per_class=5)
+    except FileNotFoundError as e:
+        warn(str(e))
+        warn("Dataset not present — skipping loader test")
+        return True
+    except Exception as e:
+        fail(f"Loader raised unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+    if not flows:
+        fail("No flows returned from loader")
+        return False
+
+    ok(f"Loaded {len(flows)} real flows from CICIDS dataset")
+
+    # Verify schema
+    for i, flow in enumerate(flows[:3]):
+        schema_ok = all(k in flow for k in ("name", "src_ip", "expected", "features"))
+        feat_ok   = all(f in flow["features"] for f in THREAT_FEATURES)
+        if schema_ok and feat_ok:
+            ok(f"Flow [{i}] '{flow['name']}' — schema ✓ | expected={flow['expected']}")
+        else:
+            fail(f"Flow [{i}] bad schema: schema_ok={schema_ok} feat_ok={feat_ok}")
+            return False
+
+    # Class distribution (network-level only — app-layer already filtered)
+    from collections import Counter
+    dist = Counter(f["expected"] for f in flows)
+    print(f"\n  {CYAN}Network-level class distribution:{RESET}")
+    for lbl, cnt in sorted(dist.items()):
+        bar = "█" * cnt
+        print(f"    {lbl:<12} {bar} ({cnt})")
+
+    # Spot-check feature values are finite floats
+    bad_values = 0
+    for flow in flows:
+        for feat, val in flow["features"].items():
+            if not isinstance(val, float) or np.isnan(val) or np.isinf(val):
+                warn(f"  Non-finite value: {flow['name']} → {feat}={val}")
+                bad_values += 1
+
+    if bad_values == 0:
+        ok("All feature values are finite floats ✓")
+    else:
+        fail(f"{bad_values} non-finite feature values found")
+        return False
+
+    return True
 
 
 # ─────────────────────────────────────────────────────────────
@@ -566,12 +730,14 @@ def main():
     print(f"\n{BOLD}{'='*60}")
     print("AIM-IPS NETWORK LAYER TEST SUITE")
     print(f"{'='*60}{RESET}")
-    print(f"  {CYAN}No root required — uses synthetic flows{RESET}")
-    print(f"  {CYAN}To test live capture: sudo python -m network_ips.network_ips --interface eth0{RESET}")
+    print(f"  {CYAN}No root required — uses real CICIDS flows{RESET}")
+    print(f"  {CYAN}Dataset: {CICIDS_DIR.resolve()}{RESET}")
+    print(f"  {CYAN}Flows per class: {FLOWS_PER_CLASS}{RESET}")
 
     results = {}
 
     tests = [
+        ("Dataset Loader",         test_dataset_loader),
         ("Feature Extractor",      test_feature_extractor),
         ("LightGBM Network",       test_lgbm_network),
         ("TCN Detector",           test_tcn),

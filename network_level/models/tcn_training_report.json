@@ -1,0 +1,31 @@
+{
+  "trained_at": "2026-03-07T13:15:29.291743",
+  "benign_path": "./mapped_data/cicids_benign.csv",
+  "novel_path": "./mapped_data/cicids_novel.csv",
+  "architecture": "TCN_Autoencoder",
+  "sequence_len": 10,
+  "pca_components": 16,
+  "n_features": 32,
+  "benign_train": 1589924,
+  "benign_val": 340698,
+  "benign_test": 340698,
+  "attack_test": 13879,
+  "epochs_trained": 80,
+  "final_train_loss": 0.9998980164527893,
+  "final_val_loss": 0.9239574074745178,
+  "anomaly_detection": {
+    "roc_auc": 0.5439850015716169,
+    "f1": 0.016900326483579798,
+    "precision": 0.015196868524061708,
+    "recall": 0.019033886085075703,
+    "threshold": 0.5167244404817023,
+    "fpr": 0.050215886042695834
+  },
+  "model_config": {
+    "filters": 64,
+    "kernel_size": 3,
+    "n_blocks": 4,
+    "bottleneck_dim": 8,
+    "dropout_rate": 0.1
+  }
+}

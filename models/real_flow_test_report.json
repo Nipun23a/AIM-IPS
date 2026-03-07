@@ -1,0 +1,26 @@
+{
+  "data_path": "./mapped_data/cicids_mapped.csv",
+  "models_dir": "./models/",
+  "n_per_class": 200,
+  "total_flows": 1000,
+  "overall": {
+    "accuracy": 0.986,
+    "macro_f1": 0.9860171155897834,
+    "weighted_f1": 0.9860171155897833
+  },
+  "per_class_accuracy": {
+    "benign": 1.0,
+    "botnet": 0.935,
+    "ddos": 1.0,
+    "dos": 0.995,
+    "portscan": 1.0
+  },
+  "training_macro_f1": 0.9614833173027758,
+  "class_distribution": {
+    "portscan": 200,
+    "botnet": 200,
+    "dos": 200,
+    "benign": 200,
+    "ddos": 200
+  }
+}

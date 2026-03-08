@@ -36,6 +36,7 @@ from pipeline.network_level.feature import (
 )
 from pipeline.network_level.lgbm_network_classifier import LGBMNetworkClassifier
 from pipeline.network_level.ensemble_detector import EnsembleDetector
+from utils import redis_threat_store
 
 logger = logging.getLogger(__name__)
 
@@ -223,20 +224,18 @@ class NetworkClassifier:
         r = self.redis
         if r is None:
             return False
-        try:
-            r.set_network_threat_score(
-                ip          = ip,
-                score       = score,
-                net_lgbm    = lgbm_score,
-                tcn         = ensemble_score,   # Redis field kept for schema compat
-                attack_type = attack_type,
-                confidence  = confidence,
-            )
+        ok = redis_threat_store.write(
+            r           = r.raw,
+            ip          = ip,
+            score       = score,
+            net_lgbm    = lgbm_score,
+            ensemble    = ensemble_score,
+            attack_type = attack_type,
+            confidence  = confidence,
+        )
+        if ok:
             self.redis_writes += 1
-            return True
-        except Exception as e:
-            logger.warning("[NetClassifier] Redis write failed for %s: %s", ip, e)
-            return False
+        return ok
 
     # ─────────────────────────────────────────────────────────
     # STATUS

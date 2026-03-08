@@ -143,15 +143,28 @@ class EnsembleDetector:
                 logger.warning("[Ensemble] %s not found: %s", name, p)
                 return None
             try:
-                # Disable XNNPack delegate for VAE — its dynamic batch/feature
-                # shape causes "failed to reshape runtimeNode" on some builds.
-                # AE and OCC have static shapes and work fine with XNNPack.
+                # Disable XNNPack for VAE — its shape causes
+                # "failed to reshape runtimeNode" with XNNPack.
+                # experimental_delegates=[] only blocks external delegates;
+                # XNNPack is built-in and requires BUILTIN_WITHOUT_DEFAULT_DELEGATES.
                 if name == "VAE":
-                    interp = tf.lite.Interpreter(
-                        model_path=str(p),
-                        experimental_delegates=[],   # CPU-only, no XNNPack
-                        num_threads=1,
-                    )
+                    try:
+                        interp = tf.lite.Interpreter(
+                            model_path=str(p),
+                            experimental_op_resolver_type=(
+                                tf.lite.experimental.OpResolverType
+                                .BUILTIN_WITHOUT_DEFAULT_DELEGATES
+                            ),
+                            num_threads=1,
+                        )
+                    except (TypeError, AttributeError):
+                        # TF < 2.7 fallback: env-var approach
+                        import os
+                        os.environ["TFLITE_DISABLE_XNNPACK"] = "1"
+                        interp = tf.lite.Interpreter(
+                            model_path=str(p), num_threads=1
+                        )
+                        del os.environ["TFLITE_DISABLE_XNNPACK"]
                 else:
                     interp = tf.lite.Interpreter(model_path=str(p))
                 interp.allocate_tensors()

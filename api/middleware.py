@@ -16,6 +16,7 @@ from shared.constants import (
 
 from firewall.decisions import FirewallDecision
 from utils.redis_client import RedisClient
+from utils import redis_threat_store
 from response.engine import ResponseEngine
 
 logger = logging.getLogger(__name__)
@@ -191,20 +192,20 @@ class IPSMiddleware(BaseHTTPMiddleware):
         return ctx
     
 
-    def _read_network_score(self,ctx:RequestContext) -> RequestContext:
+    def _read_network_score(self, ctx: RequestContext) -> RequestContext:
         if self.redis:
             try:
-                data = self.redis.get_network_threat_score(ctx.ip)
+                data = redis_threat_store.read(self.redis.raw, ctx.ip)
                 if data:
                     ctx.network_threat = data
-                    ctx.network_score  = float(data.get("score", 0.0))
+                    ctx.network_score  = float(data.get(redis_threat_store.F_SCORE, 0.0))
                     logger.debug(
-                        f"[Middleware] Net score {ctx.ip}: "
-                        f"{ctx.network_score:.3f} "
-                        f"type={data.get('attack_type', '?')}"
+                        "[Middleware] Net score %s: %.3f type=%s",
+                        ctx.ip, ctx.network_score,
+                        data.get(redis_threat_store.F_ATTACK_TYPE, "?"),
                     )
             except Exception as e:
-                logger.warning(f"[Middleware] Redis network score read failed: {e}")
+                logger.warning("[Middleware] Redis network score read failed: %s", e)
         return ctx
     
     async def _apply_action(

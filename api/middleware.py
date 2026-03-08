@@ -1,28 +1,32 @@
 import asyncio
+import json
 import time
 import logging
 import uuid
-from typing import Callable,Optional
+from typing import Callable, Optional
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse,Response
+from starlette.responses import JSONResponse, Response
 
-
-from shared.schemas import RequestContext,LayerScore
+from shared.schemas import RequestContext, LayerScore
 from shared.constants import (
-    LAYER_0,LAYER_1,ACTION_BLOCK,ACTION_CAPTCHA,ACTION_THROTTLE,ACTION_DELAY,ACTION_ALLOW,NORMAL_LABELS
+    LAYER_0, LAYER_1, ACTION_BLOCK, ACTION_CAPTCHA, ACTION_THROTTLE,
+    ACTION_DELAY, ACTION_ALLOW, NORMAL_LABELS,
+    KEY_BLACKLIST, KEY_RATE_LIMIT, KEY_NETWORK_THREAT,
+    TTL_RATE_LIMIT, MAX_REQUESTS_PER_MINUTE,
 )
-
 from firewall.decisions import FirewallDecision
+from firewall.regex_filter import RegexFilter
 from utils.redis_client import RedisClient
 from utils import redis_threat_store
 from response.engine import ResponseEngine
 
 logger = logging.getLogger(__name__)
 
-DELAY_SECONDS = 1.5
+DELAY_SECONDS    = 1.5
 THROTTLE_SECONDS = 3.0
+
 
 class IPSMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, skip_paths: list = None):
@@ -32,7 +36,9 @@ class IPSMiddleware(BaseHTTPMiddleware):
         ]
         self.response_engine = ResponseEngine(auto_blacklist=True)
         self._redis          = None
-        self._firewall       = None 
+        self._firewall       = None
+        # RegexFilter cached once — avoids re-instantiation on every request
+        self._regex_filter   = RegexFilter()
     
     @property
     def redis(self):
@@ -57,24 +63,34 @@ class IPSMiddleware(BaseHTTPMiddleware):
     def _get_layer2(self,request:Request):
         return getattr(request.app.state,"layer2",None)
     
-    async def dispatch(self, request : Request, call_next : Callable):
+    async def dispatch(self, request: Request, call_next: Callable):
         if any(request.url.path.startswith(p) for p in self.skip_paths):
             return await call_next(request)
-        
+
         ctx = await self._build_context(request)
 
-        ctx = self._run_layer0(ctx)
+        # ── Single Redis pipeline: blacklist + rate-limit + network score ──
+        # One round-trip replaces three serial GET/INCR calls.
+        is_blacklisted, rate_count, net_data = self._redis_bulk_read(ctx.ip)
+
+        # Layer 0 — blacklist / rate-limit / static firewall
+        ctx = self._run_layer0(ctx, is_blacklisted, rate_count)
         if ctx.short_circuited:
-            self._log_request(ctx)
+            asyncio.ensure_future(self._log_async(ctx))
             return self._blocked_response(ctx)
-        
+
+        # Layer 1 — regex filter (cached instance)
         ctx = self._run_layer1(ctx)
         if ctx.short_circuited:
-            self._log_request(ctx)
+            asyncio.ensure_future(self._log_async(ctx))
             return self._blocked_response(ctx)
-        
-        ctx = self._read_network_score(ctx)
 
+        # Inject pre-fetched network score
+        if net_data:
+            ctx.network_threat = net_data
+            ctx.network_score  = float(net_data.get(redis_threat_store.F_SCORE, 0.0))
+
+        # Layer 2 — ML
         layer2 = self._get_layer2(request)
         if layer2:
             ctx = layer2.run(ctx)
@@ -83,32 +99,62 @@ class IPSMiddleware(BaseHTTPMiddleware):
             ctx.add_score(LayerScore.clean(LAYER_0))
 
         decision, detail = self.response_engine.decide(ctx)
-        self._log_request(ctx)
+        asyncio.ensure_future(self._log_async(ctx))   # fire-and-forget
         return await self._apply_action(ctx, decision, request, call_next)
     
 
-    def _run_layer0(self,ctx:RequestContext) -> RequestContext:
+    def _redis_bulk_read(self, ip: str):
+        """
+        Single Redis pipeline replacing 3 serial calls:
+          EXISTS blacklist:ip:{ip}
+          INCR   ratelimit:ip:{ip}  +  EXPIRE
+          GET    threat:ip:{ip}
+
+        Returns (is_blacklisted, rate_count, net_data_dict_or_None).
+        Falls back gracefully if Redis is unavailable.
+        """
+        r = self.redis
+        if r is None:
+            return False, 0, None
         try:
-            if self.redis and self.redis.is_blacklisted(ctx.ip):
+            pipe = r.raw.pipeline(transaction=False)
+            pipe.exists(KEY_BLACKLIST.format(ip=ip))
+            pipe.incr(KEY_RATE_LIMIT.format(ip=ip))
+            pipe.expire(KEY_RATE_LIMIT.format(ip=ip), TTL_RATE_LIMIT)
+            pipe.get(KEY_NETWORK_THREAT.format(ip=ip))
+            results = pipe.execute()
+
+            is_bl      = bool(results[0])
+            rate_count = int(results[1])
+            raw_net    = results[3]
+            net_data   = json.loads(raw_net) if raw_net else None
+            return is_bl, rate_count, net_data
+        except Exception as e:
+            logger.warning("[Middleware] Redis pipeline failed: %s", e)
+            return False, 0, None
+
+    def _run_layer0(self, ctx: RequestContext,
+                    is_blacklisted: bool, rate_count: int) -> RequestContext:
+        try:
+            if is_blacklisted:
                 ctx.add_score(LayerScore.hard_block(
-                    layer= LAYER_0, label="blacklisted",
-                    reason="IP is blacklisted"
+                    layer=LAYER_0, label="blacklisted", reason="IP is blacklisted"
                 ))
                 ctx.short_circuited = True
-                ctx.action = ACTION_BLOCK
-                ctx.block_reason = "IP blacklisted"
+                ctx.action          = ACTION_BLOCK
+                ctx.block_reason    = "IP blacklisted"
                 return ctx
-            if self.redis and self.redis.is_rate_limited(ctx.ip):
-                ctx.add_score(LayerScore.hard_block(
-                    layer=LAYER_0,label="rate_limited"
-                ))
+
+            if rate_count > MAX_REQUESTS_PER_MINUTE:
+                ctx.add_score(LayerScore.hard_block(layer=LAYER_0, label="rate_limited"))
                 ctx.short_circuited = True
-                ctx.action = ACTION_BLOCK
-                ctx.block_reason = "Rate Limit exceeded"
+                ctx.action          = ACTION_BLOCK
+                ctx.block_reason    = "Rate limit exceeded"
+                return ctx
 
             if self.firewall:
                 req_dict = self._ctx_to_dict(ctx)
-                decision,reason = self.firewall.inspect(req_dict)
+                decision, reason = self.firewall.inspect(req_dict)
 
                 if decision == FirewallDecision.MITIGATE:
                     ctx.add_score(LayerScore.hard_block(
@@ -119,12 +165,11 @@ class IPSMiddleware(BaseHTTPMiddleware):
                     ctx.short_circuited = True
                     ctx.action          = ACTION_BLOCK
                     ctx.block_reason    = str(reason)
-                
+
                 elif decision == FirewallDecision.FORWARD_TO_ML:
                     suspicion_score = 0.0
                     if isinstance(reason, dict):
-                        raw = reason.get("suspicion_score", 0)
-                        suspicion_score = min(0.4, raw * 0.10)
+                        suspicion_score = min(0.4, reason.get("suspicion_score", 0) * 0.10)
                     ctx.add_score(LayerScore(
                         score=suspicion_score, label="suspicious",
                         confidence=0.5, layer=LAYER_0, triggered=False,
@@ -136,77 +181,53 @@ class IPSMiddleware(BaseHTTPMiddleware):
                 ctx.add_score(LayerScore.clean(LAYER_0))
 
         except Exception as e:
-            logger.error(f"[Middleware] Layer0 error: {e}", exc_info=True)
+            logger.error("[Middleware] Layer0 error: %s", e, exc_info=True)
             ctx.add_score(LayerScore.clean(LAYER_0))
 
         return ctx
-    
-    def _run_layer1(self,ctx:RequestContext) -> RequestContext:
+
+    def _run_layer1(self, ctx: RequestContext) -> RequestContext:
         try:
-            from firewall.regex_filter import RegexFilter
-            regex_filter = RegexFilter()
             req_dict = self._ctx_to_dict(ctx)
-            result = regex_filter.inspect(req_dict)
+            decision, reason = self._regex_filter.inspect(req_dict)
 
-            decision, reason = result if isinstance(result,tuple) else (result,"")
-
-            if decision in (
-                FirewallDecision.MITIGATE,
-                FirewallDecision.BLOCK,
-                "BLOCK","MITIGATE"
-            ):
+            if decision in (FirewallDecision.MITIGATE, FirewallDecision.BLOCK,
+                            "BLOCK", "MITIGATE"):
                 ctx.add_score(LayerScore.hard_block(
                     layer=LAYER_1,
                     label=str(reason) if reason else "regex_match",
-                    reason = str(reason),
+                    reason=str(reason),
                 ))
-
                 ctx.short_circuited = True
-                ctx.action = ACTION_BLOCK
-                ctx.block_reason = str(reason)
-
+                ctx.action          = ACTION_BLOCK
+                ctx.block_reason    = str(reason)
 
             elif decision == FirewallDecision.FORWARD_TO_ML:
-                conf = reason.get("confidence",0.65) if isinstance (reason,dict) else 0.65
-                score = regex_filter.confidence_to_score(conf)
-
-                label  = reason.get("pattern_group","regex_suspicious") if isinstance(reason,dict) else "regex_suspicious"
-
+                conf  = reason.get("confidence", 0.65) if isinstance(reason, dict) else 0.65
+                score = self._regex_filter.confidence_to_score(conf)
+                label = reason.get("pattern_group", "regex_suspicious") if isinstance(reason, dict) else "regex_suspicious"
                 ctx.add_score(LayerScore(
                     score=score, label=label,
                     confidence=conf, layer=LAYER_1, triggered=False,
-                    metadata=reason if isinstance(reason,dict) else {"reason" : str(reason)},
+                    metadata=reason if isinstance(reason, dict) else {"reason": str(reason)},
                 ))
-            
             else:
                 ctx.add_score(LayerScore.clean(LAYER_1))
 
-        except ImportError:
-            logger.warning("[Middleware] RegexFilter not found - skipping Layer 1")
-            ctx.add_score(LayerScore.clean(LAYER_1))
-        
         except Exception as e:
-            logger.error(f"[Middleware] Layer1 error: {e}", exc_info=True)
+            logger.error("[Middleware] Layer1 error: %s", e, exc_info=True)
             ctx.add_score(LayerScore.clean(LAYER_1))
 
         return ctx
     
 
-    def _read_network_score(self, ctx: RequestContext) -> RequestContext:
-        if self.redis:
-            try:
-                data = redis_threat_store.read(self.redis.raw, ctx.ip)
-                if data:
-                    ctx.network_threat = data
-                    ctx.network_score  = float(data.get(redis_threat_store.F_SCORE, 0.0))
-                    logger.debug(
-                        "[Middleware] Net score %s: %.3f type=%s",
-                        ctx.ip, ctx.network_score,
-                        data.get(redis_threat_store.F_ATTACK_TYPE, "?"),
-                    )
-            except Exception as e:
-                logger.warning("[Middleware] Redis network score read failed: %s", e)
-        return ctx
+    async def _log_async(self, ctx: RequestContext) -> None:
+        """Fire-and-forget: log to Redis without blocking the response."""
+        try:
+            if self.redis:
+                self.redis.log_request_scores(ctx.request_id, ctx.to_log_dict())
+        except Exception as e:
+            logger.error("[Middleware] Async log error: %s", e)
     
     async def _apply_action(
         self,
@@ -273,17 +294,6 @@ class IPSMiddleware(BaseHTTPMiddleware):
         return response
     
 
-    def _log_request(self, ctx: RequestContext) -> None:
-        try:
-            log_dict = ctx.to_log_dict()
-            if self.redis:
-                self.redis.log_request_scores(ctx.request_id, log_dict)
-            try:
-                logger.log(log_dict)
-            except ImportError:
-                pass  
-        except Exception as e:
-            logger.error(f"[Middleware] Logging error: {e}")
 
     async def _build_context(self, request: Request) -> RequestContext:
         try:

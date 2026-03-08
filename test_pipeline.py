@@ -302,7 +302,7 @@ def test_full_pipeline():
     from shared.constants import LAYER_0, LAYER_1
     from firewall.decisions import FirewallDecision
     from firewall.regex_filter import RegexFilter
-    from pipeline.layer2 import Layer2MLOrchestrator
+    from pipeline.application_level.layer2 import Layer2MLOrchestrator
     from response.engine import ResponseEngine
 
     # Load models once

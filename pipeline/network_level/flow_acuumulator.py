@@ -1,8 +1,19 @@
+"""
+pipeline/network_level/flow_acuumulator.py
+──────────────────────────────────────────
+Packet → Flow accumulation and feature extraction.
+
+UNIT CONTRACT — must match CICFlowMeter / CICIDS2017 exactly:
+  flow duration  → microseconds
+  flow bytes/s   → bytes per second   (total_bytes / duration_seconds)
+  flow packets/s → packets per second (total_pkts  / duration_seconds)
+  idle mean/std  → microseconds
+"""
+
 import time
 import threading
 import logging
 import numpy as np
-from collections import defaultdict
 from typing import Callable, Dict, List, Optional
 
 from pipeline.network_level.feature import (
@@ -28,7 +39,6 @@ class Flow:
         self.start_time = start_time
         self.last_seen  = start_time
         self.packets: List[PacketRecord] = []
-
         self._idle_times: List[float] = []   # stored in SECONDS internally
 
     def add_packet(self, pkt: PacketRecord) -> None:
@@ -52,28 +62,14 @@ class Flow:
         return len(self.packets)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Feature extraction
-#
-# UNIT CONTRACT — must match CICFlowMeter / CICIDS2017 exactly:
-#
-#   flow duration    →  microseconds  (CICFlowMeter stores µs)
-#   flow bytes/s     →  bytes per second   (total_bytes / duration_seconds)
-#   flow packets/s   →  packets per second (total_pkts  / duration_seconds)
-#   idle mean/std    →  microseconds
-#
-# All other features are counts/means with no unit conversion needed.
-# ─────────────────────────────────────────────────────────────────────────────
-
 def extract_flow_features(flow: Flow) -> Optional[dict]:
     pkts = flow.packets
     if len(pkts) < MIN_PACKETS_PER_FLOW:
         return None
 
     # ── Duration ──────────────────────────────────────────────
-    # Store as MICROSECONDS to match CICIDS2017
     duration_sec = max(flow.last_seen - flow.start_time, 1e-9)
-    duration_us  = duration_sec * 1_000_000          # ← µs for the feature
+    duration_us  = duration_sec * 1_000_000          # µs — matches CICIDS2017
 
     # ── Packet splits ─────────────────────────────────────────
     fwd_pkts = [p for p in pkts if p.direction == "fwd"]
@@ -82,7 +78,6 @@ def extract_flow_features(flow: Flow) -> Optional[dict]:
     fwd_lengths = [p.length for p in fwd_pkts] or [0]
     bwd_lengths = [p.length for p in bwd_pkts] or [0]
     all_lengths = [p.length for p in pkts]
-
     total_bytes = sum(all_lengths)
 
     # ── TCP flags ─────────────────────────────────────────────
@@ -92,34 +87,26 @@ def extract_flow_features(flow: Flow) -> Optional[dict]:
     psh_count = sum(1 for p in pkts if p.flags and p.flags & PSH)
 
     # ── Idle times → microseconds ─────────────────────────────
-    # _idle_times is stored in seconds; convert to µs for the model
+    # _idle_times stored in seconds; convert to µs for the model
     idle_us = [t * 1_000_000 for t in flow._idle_times] if flow._idle_times else [0.0]
 
     features = {
-        # duration in MICROSECONDS
-        "flow duration":                  duration_us,
-
-        "total fwd packets":              len(fwd_pkts),
-        "total backward packets":         len(bwd_pkts),
-        "total length of fwd packets":    sum(fwd_lengths),
-        "total length of bwd packets":    sum(bwd_lengths),
-        "fwd packet length mean":         float(np.mean(fwd_lengths)),
-        "bwd packet length mean":         float(np.mean(bwd_lengths)),
-
-        # bytes/s and packets/s use SECONDS (same as CICFlowMeter formula)
-        "flow bytes/s":                   total_bytes / duration_sec,
-        "flow packets/s":                 len(pkts)   / duration_sec,
-
-        "syn flag count":                 syn_count,
-        "ack flag count":                 ack_count,
-        "psh flag count":                 psh_count,
-
-        "packet length mean":             float(np.mean(all_lengths)),
-        "packet length std":              float(np.std(all_lengths)) if len(all_lengths) > 1 else 0.0,
-
-        # idle in MICROSECONDS
-        "idle mean":                      float(np.mean(idle_us)),
-        "idle std":                       float(np.std(idle_us)) if len(idle_us) > 1 else 0.0,
+        "flow duration":               duration_us,
+        "total fwd packets":           len(fwd_pkts),
+        "total backward packets":      len(bwd_pkts),
+        "total length of fwd packets": sum(fwd_lengths),
+        "total length of bwd packets": sum(bwd_lengths),
+        "fwd packet length mean":      float(np.mean(fwd_lengths)),
+        "bwd packet length mean":      float(np.mean(bwd_lengths)),
+        "flow bytes/s":                total_bytes / duration_sec,
+        "flow packets/s":              len(pkts)   / duration_sec,
+        "syn flag count":              syn_count,
+        "ack flag count":              ack_count,
+        "psh flag count":              psh_count,
+        "packet length mean":          float(np.mean(all_lengths)),
+        "packet length std":           float(np.std(all_lengths)) if len(all_lengths) > 1 else 0.0,
+        "idle mean":                   float(np.mean(idle_us)),
+        "idle std":                    float(np.std(idle_us)) if len(idle_us) > 1 else 0.0,
     }
 
     missing = set(THREAT_FEATURES) - set(features.keys())
@@ -133,27 +120,23 @@ def extract_flow_features(flow: Flow) -> Optional[dict]:
 class FlowAccumulator:
     def __init__(self, on_flow_complete: Callable[[str, dict], None]):
         self._flows: Dict[str, Flow] = {}
-        self._lock  = threading.Lock()
-        self._on_complete   = on_flow_complete
+        self._lock            = threading.Lock()
+        self._on_complete     = on_flow_complete
         self._completed_count = 0
         self._dropped_count   = 0
 
     def add_packet(
         self,
-        src_ip: str,
-        dst_ip: str,
-        length: int,
-        flags: int,
+        src_ip:    str,
+        dst_ip:    str,
+        length:    int,
+        flags:     int,
         timestamp: float,
-        local_ip: str,
+        local_ip:  str,
     ) -> None:
         direction = "bwd" if src_ip == local_ip else "fwd"
-        pkt = PacketRecord(
-            timestamp=timestamp,
-            length=length,
-            direction=direction,
-            flags=flags,
-        )
+        pkt = PacketRecord(timestamp=timestamp, length=length,
+                           direction=direction, flags=flags)
 
         with self._lock:
             flow_key = src_ip if direction == "fwd" else dst_ip
@@ -161,14 +144,12 @@ class FlowAccumulator:
                 self._flows[flow_key] = Flow(src_ip=flow_key, start_time=timestamp)
             flow = self._flows[flow_key]
             flow.add_packet(pkt)
-
             if flow.has_fin_rst():
                 self._complete_flow(flow_key, flow)
 
     def sweep_expired(self) -> int:
         now     = time.time()
         expired = []
-
         with self._lock:
             for key, flow in self._flows.items():
                 if flow.is_expired(now):
@@ -176,7 +157,6 @@ class FlowAccumulator:
             for key in expired:
                 flow = self._flows.pop(key)
                 self._complete_flow_unlocked(key, flow)
-
         return len(expired)
 
     def _complete_flow(self, key: str, flow: Flow) -> None:
@@ -199,7 +179,6 @@ class FlowAccumulator:
             f"duration={features['flow duration']:.0f}µs | "
             f"bytes/s={features['flow bytes/s']:.0f}"
         )
-
         try:
             self._on_complete(key, features)
         except Exception as e:

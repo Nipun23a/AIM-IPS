@@ -1,11 +1,27 @@
 """
-network_classifier.py
-──────────────────────
-Fuses LightGBM (multi-class) + Autoencoder (anomaly) scores.
+pipeline/network_level/network_classifier.py
+──────────────────────────────────────────────
+Fuses LightGBM (supervised, known attacks) + EnsembleDetector
+(semi-supervised anomaly detector) scores.
 
-LightGBM  → classifies known attacks (benign / ddos / portscan)
-Autoencoder → catches zero-day / novel attacks via reconstruction error
-              trained on BENIGN-only traffic, no attack labels needed
+Stage 1 — LightGBM
+    Multi-class: benign / ddos / portscan / bot
+    Threat score = 1 - P(benign)
+
+Stage 2 — EnsembleDetector  (AE + VAE + OCC + IsolationForest)
+    AE + VAE : BENIGN-only → zero-day via distribution shift
+    OCC      : semi-supervised → boundary from real attacks
+    IsoForest: semi-supervised → real contamination ratio
+    Output: 0.0 (normal) .. 0.5 (boundary) .. 1.0 (anomalous)
+
+Fusion:
+    fused = WEIGHT_NETWORK_LGBM * lgbm_score
+          + WEIGHT_NETWORK_TCN  * ensemble_score
+
+Attack type:
+    lgbm_label != benign         -> known attack (ddos / portscan / bot)
+    lgbm benign + ens anomaly    -> ZeroDay
+    both clean                   -> clean
 """
 
 import logging
@@ -17,10 +33,9 @@ from shared.constants import WEIGHT_NETWORK_LGBM, WEIGHT_NETWORK_TCN
 from pipeline.network_level.feature import (
     LABEL_BENIGN, LABEL_ZERODAY, LABEL_CLEAN,
     LGBM_MODEL_PATH, LGBM_FEATURES_PATH,
-    TCN_TFLITE_PATH, TCN_SCALER_PATH, TCN_FEATURES_PATH,
 )
 from pipeline.network_level.lgbm_network_classifier import LGBMNetworkClassifier
-from pipeline.network_level.autoencoder_detector import AutoencoderDetector
+from pipeline.network_level.ensemble_detector import EnsembleDetector
 
 logger = logging.getLogger(__name__)
 
@@ -29,32 +44,22 @@ _BENIGN_LABELS = {"BENIGN", "benign", "normal", "Normal"}
 
 class NetworkClassifier:
     """
-    Two-stage network threat classifier:
+    Two-stage network threat classifier.
 
-    Stage 1 — LightGBM (known attack taxonomy)
-        Output: label ∈ {benign, ddos, portscan} + per-class probabilities
-        Threat score = 1 - P(benign)
-
-    Stage 2 — Autoencoder (zero-day / novel anomaly)
-        Trained on BENIGN flows only.
-        Score = normalised reconstruction MSE:
-            < 0.5 → clean  |  ≥ 0.5 → anomalous
-
-    Fusion:
-        fused = WEIGHT_NETWORK_LGBM × lgbm_score
-              + WEIGHT_NETWORK_TCN  × ae_score
-
-    Attack type decision:
-        lgbm label ≠ benign → use lgbm label  (known attack)
-        lgbm benign but ae anomaly → "ZeroDay"
-        both clean → "clean"
+    Backwards-compatible result dict — all existing keys are preserved:
+      fused_score, lgbm_score, lgbm_label, lgbm_probs,
+      attack_type, is_threat, redis_written, timestamp
+      ensemble_score  <- new primary key
+      tcn_score       <- legacy alias for ensemble_score
+      ae_score        <- legacy alias for ensemble_score
     """
 
     def __init__(
         self,
         lgbm_model_path:    Path = None,
         lgbm_features_path: Path = None,
-        tcn_tflite_path:    Path = None,  # kept for API compat — points to AE model
+        # Legacy kwargs — accepted but ignored; ensemble paths come from feature.py
+        tcn_tflite_path:    Path = None,
         tcn_scaler_path:    Path = None,
         tcn_features_path:  Path = None,
     ):
@@ -62,16 +67,11 @@ class NetworkClassifier:
             model_path    = lgbm_model_path    or Path(LGBM_MODEL_PATH),
             features_path = lgbm_features_path or Path(LGBM_FEATURES_PATH),
         )
-        # AutoencoderDetector uses the same path constants as TCNDetector
-        # (TCN_TFLITE_PATH etc. should now point to autoencoder_fp32.tflite)
-        self.ae = AutoencoderDetector(
-            tflite_path   = tcn_tflite_path   or Path(TCN_TFLITE_PATH),
-            scaler_path   = tcn_scaler_path   or Path(TCN_SCALER_PATH),
-            features_path = tcn_features_path or Path(TCN_FEATURES_PATH),
-        )
+        self.ensemble = EnsembleDetector()
 
-        # Backwards-compat alias so test code using .tcn still works
-        self.tcn = self.ae
+        # Backwards-compat aliases
+        self.ae  = self.ensemble
+        self.tcn = self.ensemble
 
         self._redis       = None
         self.total_flows  = 0
@@ -101,32 +101,30 @@ class NetworkClassifier:
     # ─────────────────────────────────────────────────────────
 
     def load(self) -> "NetworkClassifier":
-        lgbm_ok = False
-        ae_ok   = False
+        lgbm_ok = ensemble_ok = False
 
         try:
             self.lgbm.load()
             lgbm_ok = True
             logger.info("[NetClassifier] LightGBM loaded ✓")
-            logger.info("[NetClassifier]   path=%s", self.lgbm.model_path)
+            logger.info("[NetClassifier]   path=%s",    self.lgbm.model_path)
             logger.info("[NetClassifier]   classes=%s", self.lgbm.classes)
         except FileNotFoundError as e:
-            logger.error("[NetClassifier] LightGBM load failed: %s", e, exc_info=True)
+            logger.error("[NetClassifier] LightGBM load failed: %s", e)
 
         try:
-            self.ae.load()
-            ae_ok = True
-            logger.info("[NetClassifier] Autoencoder loaded ✓")
-            logger.info("[NetClassifier]   path=%s",      self.ae.tflite_path)
-            logger.info("[NetClassifier]   threshold=%.6f", self.ae._threshold)
-            logger.info("[NetClassifier]   features=%d",  len(self.ae.features))
+            self.ensemble.load()
+            ensemble_ok = True
+            logger.info("[NetClassifier] Ensemble detector loaded ✓")
+            logger.info("[NetClassifier]   models=%s",    self.ensemble.model_summary())
+            logger.info("[NetClassifier]   threshold=%.6f", self.ensemble._raw_thr or 0.0)
         except FileNotFoundError as e:
-            logger.error("[NetClassifier] Autoencoder not found: %s", e)
+            logger.error("[NetClassifier] Ensemble not found: %s", e)
         except Exception as e:
-            logger.error("[NetClassifier] Autoencoder load failed: %s", e, exc_info=True)
+            logger.error("[NetClassifier] Ensemble load failed: %s", e, exc_info=True)
 
-        if not lgbm_ok and not ae_ok:
-            logger.error("[NetClassifier] No models loaded — network scoring disabled")
+        if not lgbm_ok and not ensemble_ok:
+            logger.error("[NetClassifier] No models loaded — scoring disabled")
 
         return self
 
@@ -141,27 +139,27 @@ class NetworkClassifier:
         lgbm_label = LABEL_BENIGN
         lgbm_score = 0.0
         lgbm_probs = {}
-
         if self.lgbm.is_ready():
-            lgbm_label, lgbm_conf, lgbm_probs = self.lgbm.predict(features)
+            lgbm_label, _, lgbm_probs = self.lgbm.predict(features)
             lgbm_score = self.lgbm.threat_score(features)
         else:
             logger.debug("[NetClassifier] LightGBM not ready")
 
-        # Stage 2 — Autoencoder
-        ae_score = 0.0
-        if self.ae.is_ready():
-            ae_score = self.ae.predict(features)
+        # Stage 2 — Ensemble
+        ensemble_score = 0.0
+        if self.ensemble.is_ready():
+            ensemble_score = self.ensemble.predict(features)
         else:
-            logger.debug("[NetClassifier] Autoencoder not ready")
+            logger.debug("[NetClassifier] Ensemble not ready")
 
         # Fusion
-        if self.lgbm.is_ready() and self.ae.is_ready():
-            fused = WEIGHT_NETWORK_LGBM * lgbm_score + WEIGHT_NETWORK_TCN * ae_score
+        if self.lgbm.is_ready() and self.ensemble.is_ready():
+            fused = (WEIGHT_NETWORK_LGBM * lgbm_score
+                   + WEIGHT_NETWORK_TCN  * ensemble_score)
         elif self.lgbm.is_ready():
             fused = lgbm_score
-        elif self.ae.is_ready():
-            fused = ae_score
+        elif self.ensemble.is_ready():
+            fused = ensemble_score
         else:
             fused = 0.0
 
@@ -169,9 +167,9 @@ class NetworkClassifier:
 
         # Attack type
         if lgbm_label not in _BENIGN_LABELS:
-            attack_type = lgbm_label                       # known: ddos, portscan, …
-        elif self.ae.is_anomaly(ae_score):
-            attack_type = LABEL_ZERODAY                    # novel / zero-day
+            attack_type = lgbm_label                        # ddos / portscan / bot
+        elif self.ensemble.is_anomaly(ensemble_score):
+            attack_type = LABEL_ZERODAY
         else:
             attack_type = LABEL_CLEAN
 
@@ -180,34 +178,38 @@ class NetworkClassifier:
             self.threat_flows += 1
 
         written = self._write_redis(
-            ip          = src_ip,
-            score       = fused,
-            lgbm_score  = lgbm_score,
-            tcn_score   = ae_score,        # field name kept for Redis schema compat
-            attack_type = attack_type,
-            confidence  = max(lgbm_score, ae_score),
+            ip             = src_ip,
+            score          = fused,
+            lgbm_score     = lgbm_score,
+            ensemble_score = ensemble_score,
+            attack_type    = attack_type,
+            confidence     = max(lgbm_score, ensemble_score),
         )
 
         if is_threat:
             logger.warning(
-                "[NetClassifier] THREAT %s → %s (fused=%.3f lgbm=%.3f ae=%.3f)",
-                src_ip, attack_type, fused, lgbm_score, ae_score,
+                "[NetClassifier] THREAT %s -> %s  "
+                "(fused=%.3f lgbm=%.3f ensemble=%.3f)",
+                src_ip, attack_type, fused, lgbm_score, ensemble_score,
             )
         else:
             logger.debug("[NetClassifier] CLEAN %s (fused=%.3f)", src_ip, fused)
 
         return {
-            "src_ip":        src_ip,
-            "fused_score":   round(fused,      4),
-            "lgbm_score":    round(lgbm_score, 4),
-            "tcn_score":     round(ae_score,   4),   # kept for compat
-            "ae_score":      round(ae_score,   4),
-            "lgbm_label":    lgbm_label,
-            "lgbm_probs":    lgbm_probs,
-            "attack_type":   attack_type,
-            "is_threat":     is_threat,
-            "redis_written": written,
-            "timestamp":     time.time(),
+            "src_ip":         src_ip,
+            "fused_score":    round(fused,          4),
+            "lgbm_score":     round(lgbm_score,     4),
+            "ensemble_score": round(ensemble_score, 4),
+            # ── Legacy aliases ─────────────────────────────────
+            "tcn_score":      round(ensemble_score, 4),
+            "ae_score":       round(ensemble_score, 4),
+            # ───────────────────────────────────────────────────
+            "lgbm_label":     lgbm_label,
+            "lgbm_probs":     lgbm_probs,
+            "attack_type":    attack_type,
+            "is_threat":      is_threat,
+            "redis_written":  written,
+            "timestamp":      time.time(),
         }
 
     # ─────────────────────────────────────────────────────────
@@ -216,7 +218,7 @@ class NetworkClassifier:
 
     def _write_redis(
         self, ip: str, score: float, lgbm_score: float,
-        tcn_score: float, attack_type: str, confidence: float,
+        ensemble_score: float, attack_type: str, confidence: float,
     ) -> bool:
         r = self.redis
         if r is None:
@@ -226,7 +228,7 @@ class NetworkClassifier:
                 ip          = ip,
                 score       = score,
                 net_lgbm    = lgbm_score,
-                tcn         = tcn_score,
+                tcn         = ensemble_score,   # Redis field kept for schema compat
                 attack_type = attack_type,
                 confidence  = confidence,
             )
@@ -247,11 +249,13 @@ class NetworkClassifier:
         except Exception:
             pass
         return {
-            "lgbm_ready":   self.lgbm.is_ready(),
-            "tcn_ready":    self.ae.is_ready(),    # compat key
-            "ae_ready":     self.ae.is_ready(),
-            "total_flows":  self.total_flows,
-            "threat_flows": self.threat_flows,
-            "redis_writes": self.redis_writes,
-            "redis_ok":     redis_ok,
+            "lgbm_ready":     self.lgbm.is_ready(),
+            "ensemble_ready": self.ensemble.is_ready(),
+            # Legacy keys — kept for network_ips.py status checks
+            "tcn_ready":      self.ensemble.is_ready(),
+            "ae_ready":       self.ensemble.is_ready(),
+            "total_flows":    self.total_flows,
+            "threat_flows":   self.threat_flows,
+            "redis_writes":   self.redis_writes,
+            "redis_ok":       redis_ok,
         }

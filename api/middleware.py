@@ -228,6 +228,19 @@ class IPSMiddleware(BaseHTTPMiddleware):
                 self.redis.log_request_scores(ctx.request_id, ctx.to_log_dict())
         except Exception as e:
             logger.error("[Middleware] Async log error: %s", e)
+
+        # Push to admin events list (24 h TTL, max 10 000 events)
+        try:
+            if self.redis:
+                event = ctx.to_log_dict()
+                event["latency_ms"] = round((time.time() - ctx.timestamp) * 1000, 1)
+                pipe = self.redis.raw.pipeline(transaction=False)
+                pipe.lpush("admin:events", json.dumps(event))
+                pipe.ltrim("admin:events", 0, 9999)
+                pipe.expire("admin:events", 86400)
+                pipe.execute()
+        except Exception as e:
+            logger.error("[Middleware] Admin event push error: %s", e)
     
     async def _apply_action(
         self,

@@ -46,29 +46,47 @@ class Layer2MLOrchestrator:
         return self
     
     def run(self, ctx: RequestContext) -> RequestContext:
-
-        if self.lgbm and self.lgbm.is_ready():
-            lgbm_score = self.lgbm.predict(ctx)
-            ctx.add_score(lgbm_score)
-            logger.debug(
-                f"[Layer2] LGBM -> {lgbm_score.label}"
-                f"score = {lgbm_score.score:.3f}"
-            )
-        else:
-            ctx.add_score(LayerScore.clean(LAYER_2_LGBM))
-            logger.warning("[Layer2] LightGBM unavailable - using zero score")
-
+        # ── Step 1: CNN Autoencoder as anomaly gate ───────────────────
+        # Run CNN first. Only anomalous requests proceed to LightGBM
+        # classification. Clean traffic is short-circuited here,
+        # avoiding LightGBM false-positives on benign payloads.
         if self.cnn and self.cnn.is_ready():
             cnn_score = self.cnn.predict(ctx)
             ctx.add_score(cnn_score)
             logger.debug(
                 f"[Layer2] CNN -> {cnn_score.label} "
-                f"score = {cnn_score.score:.3f}"
+                f"score={cnn_score.score:.3f}"
             )
-
         else:
-            ctx.add_score(LayerScore.clean(LAYER_2_CNN))
+            cnn_score = LayerScore.clean(LAYER_2_CNN)
+            ctx.add_score(cnn_score)
             logger.warning("[Layer2] CNN unavailable - using zero score")
+
+        # ── Step 2: LightGBM — only if CNN flagged an anomaly ────────
+        cnn_flagged = cnn_score.label in {"anomaly", "zeroday"} or cnn_score.score > 0.5
+
+        if cnn_flagged:
+            if self.lgbm and self.lgbm.is_ready():
+                lgbm_score = self.lgbm.predict(ctx)
+                ctx.add_score(lgbm_score)
+                logger.debug(
+                    f"[Layer2] LGBM -> {lgbm_score.label} "
+                    f"score={lgbm_score.score:.3f}"
+                )
+            else:
+                ctx.add_score(LayerScore.clean(LAYER_2_LGBM))
+                logger.warning("[Layer2] LightGBM unavailable - using zero score")
+        else:
+            # CNN passed as clean — skip LightGBM, treat as normal
+            ctx.add_score(LayerScore(
+                score=0.0,
+                label="clean",
+                confidence=1.0,
+                layer=LAYER_2_LGBM,
+                triggered=False,
+                metadata={"skipped_reason": "cnn_gate_clean"},
+            ))
+            logger.debug("[Layer2] CNN gate clean — LightGBM skipped")
 
         return ctx
     

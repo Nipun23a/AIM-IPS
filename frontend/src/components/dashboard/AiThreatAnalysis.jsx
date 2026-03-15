@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-const OAI_KEY = process.env.REACT_APP_OPENAI_API_KEY || "";
+const OAI_KEY =  "";
 
 export default function AiThreatAnalysis({ stats, events }) {
   const [oaiKey,    setOaiKey]    = useState(() => localStorage.getItem("oai_key") || OAI_KEY || "");

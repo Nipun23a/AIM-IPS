@@ -25,8 +25,8 @@ export const LAYER_WEIGHTS = {
 };
 
 export const SERVER_LOC = {
-  lat: parseFloat(process.env.REACT_APP_SERVER_LAT) || 6.9271,
-  lng: parseFloat(process.env.REACT_APP_SERVER_LNG) || 79.8612,
+  lat: 6.9271,
+  lng: 79.8612,
 };
 
 export const ATTACK_COLORS = [
@@ -42,5 +42,5 @@ export const LAYER_META = [
   { key: "layer2_lgbm", label: "Layer 2a", name: "LightGBM App",    desc: "Threat classifier — runs after CNN gate" },
 ];
 
-export const ADMIN_USERNAME = process.env.REACT_APP_ADMIN_USERNAME || "admin";
-export const ADMIN_PASSWORD = process.env.REACT_APP_ADMIN_PASSWORD || "aimips2024";
+export const ADMIN_USERNAME = "admin";
+export const ADMIN_PASSWORD = "aimips2024";

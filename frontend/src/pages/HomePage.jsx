@@ -1,89 +1,54 @@
 import { Link } from "react-router-dom";
+import {
+  Shield,
+  Eye,
+  Cpu,
+  Zap,
+  Globe,
+  Sparkles
+} from "lucide-react";
 
-// ── Icon helpers ────────────────────────────────────────────────────────────────
-function ShieldIcon({ className }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
-    </svg>
-  );
-}
-function BoltIcon({ className }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
-    </svg>
-  );
-}
-function ChipIcon({ className }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25zm.75-12h9v9h-9v-9z" />
-    </svg>
-  );
-}
-function EyeIcon({ className }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.964-7.178z" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-    </svg>
-  );
-}
-function GlobeIcon({ className }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" />
-    </svg>
-  );
-}
-function SparklesIcon({ className }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
-    </svg>
-  );
-}
+
 
 // ── Feature cards ────────────────────────────────────────────────────────────────
 const FEATURES = [
   {
-    icon: ShieldIcon,
+    icon: Shield,
     color: "from-blue-500/20 to-blue-600/10 border-blue-500/30",
     iconColor: "text-blue-400",
     title: "Static Firewall (Layer 0)",
     desc: "Instant IP blacklist lookup, rate-limit enforcement, and bad User-Agent detection. Zero latency first line of defense.",
   },
   {
-    icon: EyeIcon,
+    icon: Eye,
     color: "from-yellow-500/20 to-yellow-600/10 border-yellow-500/30",
     iconColor: "text-yellow-400",
     title: "Regex Attack Filter (Layer 1)",
     desc: "Pattern-matched detection for SQLi, XSS, command injection, and path traversal with confidence scoring.",
   },
   {
-    icon: ChipIcon,
+    icon: Cpu,
     color: "from-orange-500/20 to-orange-600/10 border-orange-500/30",
     iconColor: "text-orange-400",
     title: "LightGBM Classifier (Layer 2a)",
     desc: "Gradient-boosted tree model trained on network traffic features. Classifies 12+ attack categories with sub-ms inference.",
   },
   {
-    icon: BoltIcon,
+    icon: Zap,
     color: "from-purple-500/20 to-purple-600/10 border-purple-500/30",
     iconColor: "text-purple-400",
     title: "CNN Autoencoder (Layer 2b)",
     desc: "Deep learning anomaly detection using reconstruction error and Mahalanobis distance to catch zero-day threats.",
   },
   {
-    icon: GlobeIcon,
+    icon: Globe,
     color: "from-cyan-500/20 to-cyan-600/10 border-cyan-500/30",
     iconColor: "text-cyan-400",
     title: "Network Intelligence",
     desc: "Redis-backed async threat scoring enriched with historical IP behavior and network-level ensemble models.",
   },
   {
-    icon: SparklesIcon,
+    icon: Sparkles,
     color: "from-indigo-500/20 to-indigo-600/10 border-indigo-500/30",
     iconColor: "text-indigo-400",
     title: "AI-Powered Analysis",
@@ -296,18 +261,28 @@ export default function HomePage() {
             </p>
           </div>
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {FEATURES.map(({ icon: Icon, color, iconColor, title, desc }) => (
-              <div
-                key={title}
-                className={`bg-gradient-to-br ${color} rounded-xl border p-5 hover:-translate-y-1 transition-transform duration-200`}
-              >
-                <div className={`w-10 h-10 rounded-lg bg-slate-900/60 flex items-center justify-center mb-3`}>
-                  <Icon className={`w-5 h-5 ${iconColor}`} />
+            {FEATURES.map((feature) => {
+              const Icon = feature.icon;
+
+              return (
+                <div
+                  key={feature.title}
+                  className={`bg-gradient-to-br ${feature.color} rounded-xl border p-5 hover:-translate-y-1 transition-transform duration-200`}
+                >
+                  <div className="w-10 h-10 rounded-lg bg-slate-900/60 flex items-center justify-center mb-3">
+                    <Icon className={`w-5 h-5 ${feature.iconColor}`} />
+                  </div>
+
+                  <h3 className="font-semibold text-slate-200 mb-2 text-sm">
+                    {feature.title}
+                  </h3>
+
+                  <p className="text-slate-400 text-xs leading-relaxed">
+                    {feature.desc}
+                  </p>
                 </div>
-                <h3 className="font-semibold text-slate-200 mb-2 text-sm">{title}</h3>
-                <p className="text-slate-400 text-xs leading-relaxed">{desc}</p>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </section>
@@ -391,7 +366,7 @@ export default function HomePage() {
         <div className="max-w-3xl mx-auto text-center">
           <div className="bg-gradient-to-br from-indigo-900/40 to-purple-900/40 rounded-3xl border border-indigo-500/20 p-12">
             <div className="w-14 h-14 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-xl shadow-indigo-500/30">
-              <ShieldIcon className="w-7 h-7 text-white" />
+              <Shield className="w-7 h-7 text-white" />
             </div>
             <h2 className="text-3xl md:text-4xl font-black text-white mb-4">
               Ready to Inspect?
@@ -422,7 +397,7 @@ export default function HomePage() {
         <div className="max-w-5xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <div className="w-6 h-6 bg-gradient-to-br from-indigo-500 to-purple-600 rounded flex items-center justify-center">
-              <ShieldIcon className="w-3.5 h-3.5 text-white" />
+              <Shield className="w-3.5 h-3.5 text-white" />
             </div>
             <span className="font-bold text-sm text-slate-300">AIM-IPS Inspector</span>
           </div>

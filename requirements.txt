@@ -14,3 +14,5 @@ scipy
 redis
 asyncpg>=0.29
 python-dotenv>=1.0
+httpx>=0.27
+websockets>=12.0

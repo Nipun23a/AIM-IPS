@@ -1,6 +1,7 @@
 import json
 import logging
 import time
+import asyncio
 import uuid
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
@@ -135,7 +136,7 @@ app.add_middleware(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["http://localhost:3000", "http://localhost:5173", "http://localhost:8000"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -384,7 +385,67 @@ async def inspect_pipeline(req: InspectRequest, request: Request):
 
     latency_ms = round((time.time() - start_time) * 1000, 2)
 
-    return {
+    # ── Log inspect result to DB queue (fire-and-forget) ──────────
+    # The inspect endpoint is read-only for Redis state, but we still
+    # want every scored request persisted so the dashboard shows real data.
+    async def _push_inspect_event():
+        try:
+            r = RedisClient.get_redis()
+            best_lbl = (
+                lgbm_label if lgbm_ran and lgbm_label not in (None, "norm", "normal")
+                else (l1_label if l1_label not in ("clean", None) else
+                      (l0_label if l0_label not in ("clean", None) else "unknown"))
+            )
+            event = {
+                "request_id":    request_id,
+                "ip":            req.ip,
+                "method":        req.method,
+                "path":          req.path,
+                "timestamp":     start_time,
+                "final_score":   fused_score,
+                "action":        final_action,
+                "block_reason":  l0_reason if short_circuit_at == "layer0" else (
+                                 l1_label  if short_circuit_at == "layer1" else ""),
+                "short_circuited": short_circuited,
+                "network_score": net_score,
+                "latency_ms":    latency_ms,
+                "best_label":    best_lbl,
+                "scores": {
+                    "regex_conf":     l1_score,
+                    "app_lgbm_score": lgbm_score_val,
+                    "net_lgbm_score": net_lgbm_score or 0.0,
+                    "deep_anomaly":   cnn_score_val,
+                    "final_risk":     fused_score,
+                },
+                "layer_scores": [
+                    {"layer": "layer0_firewall", "score": l0_score,  "label": l0_label,
+                     "confidence": l0_score, "triggered": l0_triggered, "metadata": {}},
+                    {"layer": "layer1_regex",    "score": l1_score,  "label": l1_label,
+                     "confidence": l1_confidence, "triggered": l1_triggered,
+                     "metadata": {"pattern_group": l1_group, "matched_in": l1_matched_in}},
+                    {"layer": "layer2_lgbm",     "score": lgbm_score_val, "label": lgbm_label or "norm",
+                     "confidence": lgbm_score_val, "triggered": lgbm_score_val > 0.5, "metadata": {}},
+                    {"layer": "layer2_cnn",      "score": cnn_score_val, "label": "anomaly" if cnn_is_anomaly else "norm",
+                     "confidence": cnn_score_val, "triggered": cnn_is_anomaly, "metadata": {}},
+                    {"layer": "network",         "score": net_score, "label": net_attack_type or "clean",
+                     "confidence": net_score, "triggered": net_score > 0.5, "metadata": {}},
+                ],
+                "source": "inspector",
+            }
+            raw = json.dumps(event)
+            pipe = r.raw.pipeline(transaction=False)
+            pipe.lpush("admin:events", raw)
+            pipe.ltrim("admin:events", 0, 9999)
+            pipe.expire("admin:events", 86400)
+            pipe.lpush("db:queue", raw)
+            pipe.ltrim("db:queue", 0, 49999)
+            pipe.execute()
+        except Exception as e:
+            logger.debug("[Inspect] DB push failed: %s", e)
+
+    asyncio.ensure_future(_push_inspect_event())
+
+    result = {
         "request_id":      request_id,
         "latency_ms":      latency_ms,
         "final_action":    final_action,
@@ -452,6 +513,7 @@ async def inspect_pipeline(req: InspectRequest, request: Request):
             },
         },
     }
+    return result
 
 @app.get("/status")
 async def status():
@@ -501,55 +563,8 @@ async def status():
 
 # ── Admin / Stats helpers ──────────────────────────────────────────────────────
 
-import random
 from datetime import datetime, timezone
 from fastapi import Query
-
-_SAMPLE_IPS   = ["185.220.101.47","45.128.232.15","193.32.162.51","91.108.4.12",
-                  "198.50.200.131","5.188.87.14","162.247.74.74","103.21.244.11",
-                  "80.82.77.33","104.244.72.115","213.226.123.45","77.111.244.2"]
-_SAMPLE_PATHS = ["/api/probe","/api/login","/admin","/wp-login.php","/.env","/api/users"]
-_COUNTRIES    = ["RU","CN","US","DE","NL","TOR","BR","KR","UA","IR"]
-_ATTACK_LABELS= ["sqli","xss","cmdi","path-traversal","bad_ua","zeroday","norm"]
-_ATTACK_LAYERS= ["layer0_firewall","layer1_regex","layer2_lgbm","layer2_cnn","network_ips"]
-_ACTIONS      = ["BLOCK","BLOCK","BLOCK","ALLOW","ALLOW","THROTTLE","CAPTCHA","DELAY"]
-
-
-def _mock_events(n: int = 50) -> list:
-    now = time.time()
-    events = []
-    for i in range(n):
-        ts = now - random.uniform(0, 86400)
-        action = random.choice(_ACTIONS)
-        label  = random.choice(_ATTACK_LABELS)
-        score  = round(random.uniform(0.7, 1.0) if action == "BLOCK" else random.uniform(0.0, 0.4), 4)
-        layer  = random.choice(_ATTACK_LAYERS) if action != "ALLOW" else "layer3_response"
-        events.append({
-            "request_id":    str(uuid.uuid4()),
-            "ip":            random.choice(_SAMPLE_IPS),
-            "method":        random.choice(["GET","POST","POST","GET"]),
-            "path":          random.choice(_SAMPLE_PATHS),
-            "timestamp":     ts,
-            "final_score":   score,
-            "action":        action,
-            "block_reason":  label if action == "BLOCK" else "",
-            "short_circuited": action == "BLOCK",
-            "network_score": round(random.uniform(0, 0.3), 4),
-            "latency_ms":    round(random.uniform(1, 25), 1),
-            "scores": {
-                "regex_conf":      round(random.uniform(0, score), 4),
-                "app_lgbm_score":  round(random.uniform(0, score), 4),
-                "net_lgbm_score":  round(random.uniform(0, 0.3), 4),
-                "deep_anomaly":    round(random.uniform(0, score * 0.5), 4),
-                "final_risk":      score,
-            },
-            "layer_scores": [
-                {"layer": layer, "score": score, "label": label,
-                 "confidence": score, "triggered": action == "BLOCK", "metadata": {}},
-            ],
-        })
-    events.sort(key=lambda e: e["timestamp"], reverse=True)
-    return events
 
 
 def _read_admin_events() -> list:
@@ -672,11 +687,15 @@ async def api_stats():
         stats["source"] = "redis"
         return stats
 
-    # 3. Fall back to mock (no data at all yet)
-    stats = _compute_stats(_mock_events(60))
-    stats["is_mock"] = True
-    stats["source"]  = "mock"
-    return stats
+    # No data yet — return empty stats
+    return {
+        "total_requests": 0, "blocked_attacks": 0,
+        "allowed_requests": 0, "throttled_captcha": 0,
+        "block_rate_pct": 0, "avg_latency_ms": 0,
+        "rpm_total": [0] * 30, "rpm_blocked": [0] * 30,
+        "attack_types": {}, "layer_counts": {}, "top_ips": [],
+        "source": "empty",
+    }
 
 
 # ── /api/events ────────────────────────────────────────────────────────────────
@@ -710,10 +729,6 @@ async def api_events(
                 return False
             events = [e for e in events if _has_type(e)]
         events = events[:limit]
-
-    # 3. Fall back to mock
-    if not events:
-        events = _mock_events(80)[:limit]
 
     # Ensure best_label is set on every event
     for e in events:

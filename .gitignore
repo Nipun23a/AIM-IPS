@@ -75,3 +75,5 @@ export/
 
 
 node_modules
+
+.env

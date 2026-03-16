@@ -2,7 +2,7 @@ import { useState } from "react";
 import ActionPill from "../common/ActionPill";
 import { fmtTime, scoreTextColor, scoreBarFillColor } from "../../utils/helpers";
 
-const OAI_KEY =  "";
+const OAI_KEY = import.meta.env.VITE_OPENAI_API_KEY || "";
 
 export default function EventDetailModal({ event, onClose }) {
   const [explainOut,     setExplainOut]     = useState("");

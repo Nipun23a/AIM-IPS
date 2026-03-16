@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-const OAI_KEY =  "";
+const OAI_KEY = import.meta.env.VITE_OPENAI_API_KEY || "";
 
 export default function AiThreatAnalysis({ stats, events }) {
   const [oaiKey,    setOaiKey]    = useState(() => localStorage.getItem("oai_key") || OAI_KEY || "");

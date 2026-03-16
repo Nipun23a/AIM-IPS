@@ -25,8 +25,8 @@ export const LAYER_WEIGHTS = {
 };
 
 export const SERVER_LOC = {
-  lat: 6.9271,
-  lng: 79.8612,
+  lat: parseFloat(import.meta.env.VITE_APP_SERVER_LAT ?? 6.9271),
+  lng: parseFloat(import.meta.env.VITE_APP_SERVER_LNG ?? 79.8612),
 };
 
 export const ATTACK_COLORS = [
@@ -42,5 +42,5 @@ export const LAYER_META = [
   { key: "layer2_lgbm", label: "Layer 2a", name: "LightGBM App",    desc: "Threat classifier — runs after CNN gate" },
 ];
 
-export const ADMIN_USERNAME = "admin";
-export const ADMIN_PASSWORD = "aimips2024";
+export const ADMIN_USERNAME = import.meta.env.VITE_ADMIN_USERNAME ?? "admin";
+export const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD ?? "aimips2024";

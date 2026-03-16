@@ -1,9 +1,18 @@
 import asyncio
 import json
+import os
 import time
 import logging
 import uuid
 from typing import Callable, Optional
+
+# IPs allowed to set X-Forwarded-For (your Nginx / load-balancer on VPS).
+# Comma-separated in .env: TRUSTED_PROXIES=127.0.0.1,10.0.0.1
+_TRUSTED_PROXIES: set = {
+    ip.strip()
+    for ip in os.getenv("TRUSTED_PROXIES", "127.0.0.1").split(",")
+    if ip.strip()
+}
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -319,11 +328,18 @@ class IPSMiddleware(BaseHTTPMiddleware):
             body       = body_bytes.decode("utf-8", errors="replace")
         except Exception:
             body = ""
-        ip = (
-            request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-            or request.headers.get("X-Real-IP", "")
-            or (request.client.host if request.client else "0.0.0.0")
-        )
+        direct_ip = request.client.host if request.client else "0.0.0.0"
+        if direct_ip in _TRUSTED_PROXIES:
+            # Request came from a trusted proxy (Nginx/LB) — use the forwarded IP
+            ip = (
+                request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+                or request.headers.get("X-Real-IP", "")
+                or direct_ip
+            )
+        else:
+            # Direct connection — use the real socket IP, ignore forwarded headers
+            # (prevents attackers from spoofing X-Forwarded-For to bypass blacklist)
+            ip = direct_ip
 
         return RequestContext(
             ip           = ip,

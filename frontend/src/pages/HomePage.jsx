@@ -5,10 +5,22 @@ import {
   Cpu,
   Zap,
   Globe,
-  Sparkles
+  Sparkles,
+  Radio,
+  Network,
+  Activity,
 } from "lucide-react";
 
 
+
+// ── Network layer pipeline steps ─────────────────────────────────────────────────
+const NET_STEPS = [
+  { icon: Radio,    color: "text-cyan-400",   bg: "bg-cyan-500/10 border-cyan-500/30",    label: "Scapy captures",      sub: "raw packets on eth0" },
+  { icon: Activity, color: "text-blue-400",   bg: "bg-blue-500/10 border-blue-500/30",    label: "FlowAccumulator",     sub: "builds IP flows" },
+  { icon: Cpu,      color: "text-orange-400", bg: "bg-orange-500/10 border-orange-500/30", label: "LightGBM + Ensemble", sub: "classifies flows" },
+  { icon: Network,  color: "text-red-400",    bg: "bg-red-500/10 border-red-500/30",      label: "Redis SETEX",         sub: "threat:ip:{ip} TTL=60s" },
+  { icon: Shield,   color: "text-indigo-400", bg: "bg-indigo-500/10 border-indigo-500/30", label: "Middleware reads",    sub: "<0.1ms per request" },
+];
 
 // ── Feature cards ────────────────────────────────────────────────────────────────
 const FEATURES = [
@@ -44,8 +56,8 @@ const FEATURES = [
     icon: Globe,
     color: "from-cyan-500/20 to-cyan-600/10 border-cyan-500/30",
     iconColor: "text-cyan-400",
-    title: "Network Intelligence",
-    desc: "Redis-backed async threat scoring enriched with historical IP behavior and network-level ensemble models.",
+    title: "Network Layer IPS",
+    desc: "Runs as a separate background process using Scapy to capture raw packets, build IP flows, and classify DDoS, port-scans, and botnet C2 traffic — writing threat scores to Redis so the middleware reads them in <0.1ms per request.",
   },
   {
     icon: Sparkles,
@@ -246,6 +258,95 @@ export default function HomePage() {
                 )}
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Network Layer ────────────────────────────────────────────────────── */}
+      <section className="px-4 py-20">
+        <div className="max-w-5xl mx-auto">
+          <div className="text-center mb-12">
+            <div className="text-xs text-cyan-400 font-semibold uppercase tracking-widest mb-3">Network Layer</div>
+            <h2 className="text-3xl md:text-4xl font-black text-white">Packet-Level Threat Detection</h2>
+            <p className="text-slate-400 mt-3 max-w-2xl mx-auto">
+              A completely independent background process captures raw network packets, builds IP flows,
+              and classifies threats — feeding scores into the middleware via Redis with zero latency overhead.
+            </p>
+          </div>
+
+          {/* Architecture diagram */}
+          <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6 mb-10">
+            <div className="flex flex-col md:flex-row items-center justify-between gap-4 text-sm">
+              {NET_STEPS.map((step, i) => (
+                <div key={i} className="flex items-center gap-3 md:flex-1">
+                  <div className={`flex-1 rounded-xl border p-3 text-center ${step.bg}`}>
+                    <step.icon className={`w-5 h-5 ${step.color} mx-auto mb-1.5`} />
+                    <div className="font-semibold text-slate-200 text-xs">{step.label}</div>
+                    <div className="text-slate-500 text-xs mt-0.5">{step.sub}</div>
+                  </div>
+                  {i < NET_STEPS.length - 1 && (
+                    <svg className="w-4 h-4 text-slate-600 flex-shrink-0 hidden md:block" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* What it detects + How to run */}
+          <div className="grid md:grid-cols-2 gap-6">
+            {/* Detects */}
+            <div className="bg-slate-900/60 rounded-2xl border border-slate-800 p-6">
+              <h3 className="font-bold text-white mb-4 flex items-center gap-2">
+                <Activity className="w-4 h-4 text-cyan-400" /> What It Detects
+              </h3>
+              <div className="space-y-3">
+                {[
+                  { label: "DDoS / SYN Flood",  method: "LightGBM",          color: "text-red-400",    dot: "bg-red-500",    desc: "High packet rate, SYN count spike" },
+                  { label: "Port Scan",           method: "LightGBM",          color: "text-orange-400", dot: "bg-orange-500", desc: "Many small flows, low bytes/packet" },
+                  { label: "Botnet C2",           method: "LightGBM",          color: "text-yellow-400", dot: "bg-yellow-500", desc: "Periodic beaconing pattern" },
+                  { label: "Zero-Day / Unknown",  method: "Ensemble AE+VAE+IF", color: "text-purple-400", dot: "bg-purple-500", desc: "Anomaly score from unsupervised models" },
+                ].map(({ label, method, color, dot, desc }) => (
+                  <div key={label} className="flex items-start gap-3">
+                    <div className={`w-2 h-2 rounded-full ${dot} mt-1.5 flex-shrink-0`} />
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-200 text-sm font-medium">{label}</span>
+                        <span className={`text-xs font-mono ${color}`}>{method}</span>
+                      </div>
+                      <div className="text-slate-500 text-xs">{desc}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* How to run */}
+            <div className="bg-slate-900/60 rounded-2xl border border-slate-800 p-6">
+              <h3 className="font-bold text-white mb-4 flex items-center gap-2">
+                <Radio className="w-4 h-4 text-cyan-400" /> How to Start It
+              </h3>
+              <p className="text-slate-400 text-xs mb-4 leading-relaxed">
+                The network layer runs as a <span className="text-slate-200 font-medium">completely separate process</span> alongside
+                FastAPI. It requires <code className="bg-slate-800 px-1 rounded text-cyan-400">sudo</code> for raw socket access (Scapy).
+              </p>
+              <div className="space-y-3">
+                {[
+                  { label: "Live capture on VPS", cmd: "sudo python -m pipeline.network_level.network_ips --interface eth0" },
+                  { label: "Test without sudo",   cmd: "python -m pipeline.network_level.network_ips --simulate" },
+                  { label: "Debug mode",          cmd: "sudo python -m pipeline.network_level.network_ips --interface eth0 --debug" },
+                ].map(({ label, cmd }) => (
+                  <div key={label}>
+                    <div className="text-xs text-slate-500 mb-1">{label}</div>
+                    <code className="block bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-cyan-300 font-mono break-all">{cmd}</code>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-slate-600 mt-4">
+                If not running, network score defaults to 0.0 — the other 4 layers still protect normally.
+              </p>
+            </div>
           </div>
         </div>
       </section>

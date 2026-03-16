@@ -3,6 +3,8 @@ import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+load_dotenv()   # loads .env from the project root before anything else
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -14,6 +16,8 @@ from pydantic import BaseModel
 from pipeline.application_level.layer2 import Layer2MLOrchestrator
 from api.middleware import IPSMiddleware
 from utils.redis_client import RedisClient
+import db.reader as db_reader
+from db.writer import run_db_writer
 from firewall.engine import StaticFirewall
 from firewall.regex_filter import RegexFilter
 from firewall.decisions import FirewallDecision
@@ -89,12 +93,29 @@ async def lifespan(app:FastAPI):
             "           - Captcha sessions"
         )
 
+    # ── PostgreSQL reader pool ─────────────────────────────────────
+    logger.info("[Startup] Connecting to PostgreSQL (reader pool)...")
+    await db_reader.init_pool()
+
+    # ── Background DB writer task ──────────────────────────────────
+    # Pops events from Redis db:queue and batch-inserts to PostgreSQL.
+    # Completely decoupled from the request pipeline — zero latency impact.
+    writer_task = None
+    try:
+        r = RedisClient.get_redis()
+        writer_task = asyncio.ensure_future(run_db_writer(r.raw))
+        logger.info("[Startup] DB writer task started ✓")
+    except Exception as e:
+        logger.warning("[Startup] DB writer could not start: %s", e)
+
     logger.info("[Startup] AIM-IPS Ready ✓")
     logger.info("=" * 60)
 
     yield
 
     logger.info("[Shutdown] AIM-IPS shutting down")
+    if writer_task:
+        writer_task.cancel()
 
 
 app = FastAPI(
@@ -638,12 +659,23 @@ def _compute_stats(events: list) -> dict:
 
 @app.get("/api/stats")
 async def api_stats():
+    # 1. Try PostgreSQL (real persistent data)
+    stats = await db_reader.fetch_stats()
+    if stats:
+        stats["source"] = "postgresql"
+        return stats
+
+    # 2. Fall back to Redis in-memory list
     events = _read_admin_events()
     stats  = _compute_stats(events)
-    if stats is None:
-        # No real data yet — return mock
-        stats = _compute_stats(_mock_events(60))
-        stats["is_mock"] = True
+    if stats:
+        stats["source"] = "redis"
+        return stats
+
+    # 3. Fall back to mock (no data at all yet)
+    stats = _compute_stats(_mock_events(60))
+    stats["is_mock"] = True
+    stats["source"]  = "mock"
     return stats
 
 
@@ -656,37 +688,46 @@ async def api_events(
     attack_type: str = Query(""),
     ip:          str = Query(""),
 ):
-    events = _read_admin_events()
-    if not events:
-        events = _mock_events(80)
+    # 1. Try PostgreSQL
+    events = await db_reader.fetch_events(
+        limit=limit, action=action, ip=ip, attack_type=attack_type
+    )
 
-    if action:
-        events = [e for e in events if e.get("action","").upper() == action.upper()]
-    if ip:
-        events = [e for e in events if e.get("ip","") == ip]
-    if attack_type:
-        def _has_type(e):
-            if attack_type.lower() in (e.get("block_reason","") or "").lower():
-                return True
-            for ls in e.get("layer_scores",[]):
-                if attack_type.lower() in (ls.get("label","") or "").lower():
+    # 2. Fall back to Redis
+    if events is None:
+        events = _read_admin_events()
+        if action:
+            events = [e for e in events if e.get("action", "").upper() == action.upper()]
+        if ip:
+            events = [e for e in events if e.get("ip", "") == ip]
+        if attack_type:
+            def _has_type(e):
+                if attack_type.lower() in (e.get("block_reason", "") or "").lower():
                     return True
-            return False
-        events = [e for e in events if _has_type(e)]
+                for ls in e.get("layer_scores", []):
+                    if attack_type.lower() in (ls.get("label", "") or "").lower():
+                        return True
+                return False
+            events = [e for e in events if _has_type(e)]
+        events = events[:limit]
 
-    events = events[:limit]
-    # Add a best-label field for convenience
+    # 3. Fall back to mock
+    if not events:
+        events = _mock_events(80)[:limit]
+
+    # Ensure best_label is set on every event
     for e in events:
         if not e.get("best_label"):
             for ls in e.get("layer_scores", []):
-                lbl = ls.get("label","")
-                if lbl and lbl not in ("clean","norm","normal"):
+                lbl = ls.get("label", "")
+                if lbl and lbl not in ("clean", "norm", "normal"):
                     e["best_label"] = lbl
                     break
             else:
                 e["best_label"] = e.get("block_reason") or (
                     "clean" if e.get("action") == "ALLOW" else "unknown"
                 )
+
     return {"events": events, "total": len(events)}
 
 

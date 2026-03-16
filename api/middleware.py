@@ -230,14 +230,19 @@ class IPSMiddleware(BaseHTTPMiddleware):
             logger.error("[Middleware] Async log error: %s", e)
 
         # Push to admin events list (24 h TTL, max 10 000 events)
+        # Also enqueue to db:queue for the background DB writer (fire-and-forget,
+        # zero pipeline coupling — actual DB write happens in a separate async task).
         try:
             if self.redis:
                 event = ctx.to_log_dict()
                 event["latency_ms"] = round((time.time() - ctx.timestamp) * 1000, 1)
+                raw_event = json.dumps(event)
                 pipe = self.redis.raw.pipeline(transaction=False)
-                pipe.lpush("admin:events", json.dumps(event))
+                pipe.lpush("admin:events", raw_event)
                 pipe.ltrim("admin:events", 0, 9999)
                 pipe.expire("admin:events", 86400)
+                pipe.lpush("db:queue", raw_event)   # picked up by DBWriter
+                pipe.ltrim("db:queue", 0, 49999)    # cap queue at 50k events
                 pipe.execute()
         except Exception as e:
             logger.error("[Middleware] Admin event push error: %s", e)

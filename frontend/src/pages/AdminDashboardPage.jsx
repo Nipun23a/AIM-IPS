@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, memo } from "react";
 import { useNavigate }       from "react-router-dom";
 import StatsCards            from "../components/dashboard/StatsCards";
 import ChartsRow             from "../components/dashboard/ChartsRow";
@@ -8,6 +8,20 @@ import AiThreatAnalysis      from "../components/dashboard/AiThreatAnalysis";
 import EventsTable           from "../components/dashboard/EventsTable";
 import EventDetailModal      from "../components/dashboard/EventDetailModal";
 import BlockedIPsModal       from "../components/dashboard/BlockedIPsModal";
+
+const LiveClock = memo(function LiveClock() {
+  const [clock, setClock] = useState(() =>
+    new Date().toLocaleTimeString("en-US", { hour12: false })
+  );
+  useEffect(() => {
+    const t = setInterval(
+      () => setClock(new Date().toLocaleTimeString("en-US", { hour12: false })),
+      1000,
+    );
+    return () => clearInterval(t);
+  }, []);
+  return <span className="text-slate-400 text-sm font-mono">{clock}</span>;
+});
 
 export default function AdminDashboardPage() {
   const navigate = useNavigate();
@@ -30,19 +44,9 @@ export default function AdminDashboardPage() {
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [blockedIPs,    setBlockedIPs]    = useState([]);
   const [showBlocked,   setShowBlocked]   = useState(false);
-  const [clock,         setClock]         = useState("");
   const [filterIp,      setFilterIp]      = useState("");
   const [filterAction,  setFilterAction]  = useState("");
   const [filterLabel,   setFilterLabel]   = useState("");
-
-  // Clock
-  useEffect(() => {
-    const t = setInterval(
-      () => setClock(new Date().toLocaleTimeString("en-US", { hour12: false })),
-      1000,
-    );
-    return () => clearInterval(t);
-  }, []);
 
   const fetchStats = useCallback(async () => {
     try { const r = await fetch("/api/stats"); setStats(await r.json()); } catch {}
@@ -58,6 +62,7 @@ export default function AdminDashboardPage() {
   }, [paused]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchStats();
     fetchEvents();
     const si = setInterval(fetchStats,  15000);
@@ -97,7 +102,7 @@ export default function AdminDashboardPage() {
           </div>
         </div>
         <div className="flex items-center gap-4">
-          <span className="text-slate-400 text-sm font-mono">{clock}</span>
+          <LiveClock />
           {/* Filters */}
           <div className="hidden lg:flex items-center gap-2">
             <input
@@ -135,27 +140,20 @@ export default function AdminDashboardPage() {
 
       {/* Main content */}
       <div className="p-5 space-y-5">
-        {/* Stat cards */}
         <StatsCards stats={stats} />
 
-        {/* Charts */}
         <div className="space-y-4">
           <ChartsRow stats={stats} />
         </div>
 
-        {/* Globe + Layer bar row */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Layer bar is rendered inside ChartsRow but we need globe here */}
           <GlobePanel events={allEvents} />
         </div>
 
-        {/* Top IPs */}
         <TopThreatIPs stats={stats} onLoadBlocked={loadBlockedIPs} />
 
-        {/* AI Analysis */}
         <AiThreatAnalysis stats={stats} events={allEvents} />
 
-        {/* Events table */}
         <EventsTable
           events={filtered}
           paused={paused}
@@ -164,7 +162,6 @@ export default function AdminDashboardPage() {
         />
       </div>
 
-      {/* Modals */}
       {selectedEvent && (
         <EventDetailModal event={selectedEvent} onClose={() => setSelectedEvent(null)} />
       )}

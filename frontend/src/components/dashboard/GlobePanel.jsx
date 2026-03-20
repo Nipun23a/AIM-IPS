@@ -180,24 +180,24 @@ export default function GlobePanel({ events }) {
     setLoading(true);
     Promise.allSettled(
       uniqueIps.map(([ip]) =>
-        fetch(`https://ip-api.com/json/${ip}?fields=query,lat,lon,country,countryCode`)
+        fetch(`https://ipwho.is/${ip}`)
           .then((r) => r.json())
       )
     ).then((results) => {
       const newFeed = [];
       const newArcs = [];
       results.forEach(({ status, value: g }) => {
-        if (status !== "fulfilled" || !g?.lat || !g?.lon) return;
-        const ev    = seen.get(g.query) || {};
+        if (status !== "fulfilled" || !g?.latitude || !g?.longitude) return;
+        const ev    = seen.get(g.ip) || {};
         const label = ev.best_label || ev.block_reason || "threat";
         const color = colorFor(label);
         newFeed.push({
-          ip: g.query, country: g.country || "Unknown",
-          countryCode: (g.countryCode || "").toLowerCase(),
-          lat: g.lat, lon: g.lon, label, color,
+          ip: g.ip, country: g.country || "Unknown",
+          countryCode: (g.country_code || "").toLowerCase(),
+          lat: g.latitude, lon: g.longitude, label, color,
         });
         newArcs.push({
-          from: [g.lon, g.lat],
+          from: [g.longitude, g.latitude],
           to:   [SERVER_LOC.lng, SERVER_LOC.lat],
           label, color,
         });

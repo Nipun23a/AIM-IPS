@@ -135,7 +135,7 @@ app.add_middleware(
     IPSMiddleware,
     skip_paths=[
         "/health", "/docs", "/openapi.json", "/redoc", "/status", "/demo",
-        "/api/inspect", "/api/stats", "/api/events", "/api/admin", "/api/myip",
+        "/api/inspect", "/api/stats", "/api/events", "/api/admin", "/api/myip", "/api/geoip",
     ],
 )
 
@@ -155,6 +155,25 @@ app.add_middleware(
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/api/geoip/{ip}")
+async def geoip(ip: str):
+    """Proxy IP geolocation — avoids CORS issues with third-party APIs."""
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.get(f"https://ipwho.is/{ip}")
+            data = r.json()
+            return {
+                "ip":           data.get("ip", ip),
+                "latitude":     data.get("latitude"),
+                "longitude":    data.get("longitude"),
+                "country":      data.get("country", "Unknown"),
+                "country_code": data.get("country_code", ""),
+            }
+    except Exception:
+        return {"ip": ip, "latitude": None, "longitude": None, "country": "Unknown", "country_code": ""}
 
 
 @app.get("/api/myip")

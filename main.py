@@ -135,7 +135,7 @@ app.add_middleware(
     IPSMiddleware,
     skip_paths=[
         "/health", "/docs", "/openapi.json", "/redoc", "/status", "/demo",
-        "/api/inspect", "/api/stats", "/api/events", "/api/admin",
+        "/api/inspect", "/api/stats", "/api/events", "/api/admin", "/api/myip",
     ],
 )
 
@@ -155,6 +155,14 @@ app.add_middleware(
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/api/myip")
+async def my_ip(request: Request):
+    """Returns the real client IP — used by the inspector to auto-fill the IP field."""
+    forwarded_for = request.headers.get("X-Forwarded-For", "")
+    ip = forwarded_for.split(",")[0].strip() if forwarded_for else request.client.host
+    return {"ip": ip}
 
 
 @app.post("/api/probe")

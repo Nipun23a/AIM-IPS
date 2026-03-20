@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import RequestBuilder   from "../components/inspector/RequestBuilder";
 import LayerToggle      from "../components/inspector/LayerToggle";
 import WeightPreview    from "../components/inspector/WeightPreview";
@@ -14,6 +14,13 @@ export default function InspectorPage() {
   const [method,  setMethod]  = useState(DEFAULT_METHOD);
   const [path,    setPath]    = useState(DEFAULT_PATH);
   const [ip,      setIp]      = useState(DEFAULT_IP);
+
+  useEffect(() => {
+    fetch("/api/myip")
+      .then((r) => r.json())
+      .then((d) => { if (d.ip) setIp(d.ip); })
+      .catch(() => {});
+  }, []);
   const [body,    setBody]    = useState("");
   const [headers, setHeaders] = useState([]);
   const [params,  setParams]  = useState([]);

@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { useState, useEffect } from "react";
 import {
   Shield,
   Eye,
@@ -10,6 +11,141 @@ import {
   Network,
   Activity,
 } from "lucide-react";
+
+// ── Threat Correlation Animation ─────────────────────────────────────────────
+
+function CorrelationDemo() {
+  const [step, setStep] = useState(0);
+  const [animKey, setAnimKey] = useState(0);
+
+  useEffect(() => {
+    const timers = [
+      setTimeout(() => setStep(1), 800),
+      setTimeout(() => setStep(2), 2200),
+      setTimeout(() => setStep(3), 3800),
+      setTimeout(() => { setStep(0); setAnimKey(k => k + 1); }, 6500),
+    ];
+    return () => timers.forEach(clearTimeout);
+  }, [animKey]);
+
+  const networkVisible  = step >= 1;
+  const appVisible      = step >= 2;
+  const corrVisible     = step >= 3;
+
+  return (
+    <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6 md:p-8 overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+          <span className="text-xs font-mono text-slate-400">correlation_engine.py · live simulation</span>
+        </div>
+        <div className="text-xs text-slate-600 font-mono">auto-replay</div>
+      </div>
+
+      {/* Two-lane timeline */}
+      <div className="space-y-3 mb-6">
+        {/* Network lane */}
+        <div className="flex items-center gap-3">
+          <div className="w-24 text-right flex-shrink-0">
+            <span className="text-xs font-mono text-cyan-400">network</span>
+          </div>
+          <div className="flex-1 h-10 bg-slate-800/60 rounded-lg border border-slate-700/40 relative overflow-hidden">
+            <div
+              className={`absolute inset-y-0 left-0 flex items-center px-3 gap-2 transition-all duration-500 ${networkVisible ? "opacity-100 translate-x-0" : "opacity-0 -translate-x-4"}`}
+            >
+              <div className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse flex-shrink-0" />
+              <span className="text-xs text-cyan-300 font-mono">portscan</span>
+              <span className="text-xs text-slate-500">score=0.45</span>
+              <span className="ml-auto text-xs font-mono px-1.5 py-0.5 rounded bg-yellow-500/10 border border-yellow-500/30 text-yellow-400">DELAY</span>
+            </div>
+          </div>
+          <div className="w-12 text-xs font-mono text-slate-600 flex-shrink-0">t=0s</div>
+        </div>
+
+        {/* App lane */}
+        <div className="flex items-center gap-3">
+          <div className="w-24 text-right flex-shrink-0">
+            <span className="text-xs font-mono text-purple-400">application</span>
+          </div>
+          <div className="flex-1 h-10 bg-slate-800/60 rounded-lg border border-slate-700/40 relative overflow-hidden">
+            <div
+              className={`absolute inset-y-0 left-0 flex items-center px-3 gap-2 transition-all duration-500 ${appVisible ? "opacity-100 translate-x-0" : "opacity-0 -translate-x-4"}`}
+            >
+              <div className="w-2 h-2 rounded-full bg-purple-500 animate-pulse flex-shrink-0" />
+              <span className="text-xs text-purple-300 font-mono">sqli</span>
+              <span className="text-xs text-slate-500">score=0.65</span>
+              <span className="ml-auto text-xs font-mono px-1.5 py-0.5 rounded bg-orange-500/10 border border-orange-500/30 text-orange-400">CAPTCHA</span>
+            </div>
+          </div>
+          <div className="w-12 text-xs font-mono text-slate-600 flex-shrink-0">t=4s</div>
+        </div>
+      </div>
+
+      {/* Correlation result */}
+      <div className={`transition-all duration-700 ${corrVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"}`}>
+        <div className="border border-red-500/40 bg-red-500/5 rounded-xl p-4">
+          <div className="flex flex-col md:flex-row items-start md:items-center gap-4">
+            {/* Left: correlation badge */}
+            <div className="flex items-center gap-3 flex-shrink-0">
+              <div className="w-8 h-8 rounded-lg bg-red-500/20 border border-red-500/40 flex items-center justify-center">
+                <span className="text-sm">🔗</span>
+              </div>
+              <div>
+                <div className="text-xs text-red-400 font-semibold uppercase tracking-wider">Correlation Detected</div>
+                <div className="text-xs text-slate-500 font-mono">layers=[network, application] · types=2</div>
+              </div>
+            </div>
+
+            {/* Score amplification */}
+            <div className="flex items-center gap-2 flex-wrap md:ml-auto">
+              <div className="text-xs font-mono text-slate-400 bg-slate-800 px-2 py-1 rounded border border-slate-700">
+                0.65
+              </div>
+              <span className="text-slate-600 text-xs">×</span>
+              <div className="text-xs font-mono text-yellow-400 bg-yellow-500/10 px-2 py-1 rounded border border-yellow-500/30">
+                1.3×
+              </div>
+              <span className="text-slate-600 text-xs">=</span>
+              <div className="text-xs font-mono text-red-300 bg-red-500/10 px-2 py-1 rounded border border-red-500/30 font-bold">
+                0.845
+              </div>
+              <div className="text-xs font-bold px-3 py-1 rounded-lg bg-red-600 text-white ml-1 animate-pulse">
+                BLOCK
+              </div>
+            </div>
+          </div>
+
+          {/* Explanation */}
+          <div className="mt-3 pt-3 border-t border-red-500/20 grid grid-cols-3 gap-2 text-center">
+            <div>
+              <div className="text-xs text-slate-500">Window</div>
+              <div className="text-xs font-mono text-slate-300">10 seconds</div>
+            </div>
+            <div>
+              <div className="text-xs text-slate-500">Distinct types</div>
+              <div className="text-xs font-mono text-slate-300">2 → ×1.3</div>
+            </div>
+            <div>
+              <div className="text-xs text-slate-500">Stored in</div>
+              <div className="text-xs font-mono text-cyan-400">corr:hist:&#123;ip&#125;</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Step indicators */}
+      <div className="flex items-center gap-2 mt-5 justify-center">
+        {[1,2,3].map((s) => (
+          <div
+            key={s}
+            className={`h-1 rounded-full transition-all duration-300 ${step >= s ? "w-8 bg-indigo-500" : "w-3 bg-slate-700"}`}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 
 
@@ -347,6 +483,34 @@ export default function HomePage() {
                 If not running, network score defaults to 0.0 — the other 4 layers still protect normally.
               </p>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Threat Correlation Pipeline ──────────────────────────────────────── */}
+      <section className="px-4 py-20 bg-slate-900/40">
+        <div className="max-w-5xl mx-auto">
+          <div className="text-center mb-10">
+            <div className="text-xs text-red-400 font-semibold uppercase tracking-widest mb-3">Cross-Pipeline Intelligence</div>
+            <h2 className="text-3xl md:text-4xl font-black text-white">Threat Correlation Engine</h2>
+            <p className="text-slate-400 mt-3 max-w-2xl mx-auto">
+              When an IP is seen attacking at both the network layer (Scapy) and the application layer (FastAPI)
+              within a short time window, AIM-IPS correlates the events and amplifies the final score —
+              turning a soft block into a hard one.
+            </p>
+          </div>
+          <CorrelationDemo />
+          <div className="grid md:grid-cols-3 gap-4 mt-6 text-center">
+            {[
+              { label: "1 attack type",  mult: "×1.0", color: "text-slate-400", bg: "bg-slate-800 border-slate-700" },
+              { label: "2 attack types", mult: "×1.3", color: "text-yellow-400", bg: "bg-yellow-900/20 border-yellow-700/40" },
+              { label: "3+ attack types",mult: "×1.5–1.7", color: "text-red-400", bg: "bg-red-900/20 border-red-700/40" },
+            ].map(({ label, mult, color, bg }) => (
+              <div key={label} className={`rounded-xl border p-4 ${bg}`}>
+                <div className={`text-xl font-black font-mono ${color}`}>{mult}</div>
+                <div className="text-xs text-slate-500 mt-1">{label}</div>
+              </div>
+            ))}
           </div>
         </div>
       </section>

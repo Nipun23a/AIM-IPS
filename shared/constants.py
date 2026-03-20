@@ -44,6 +44,7 @@ KEY_BLACKLIST       = "blacklist:ip:{ip}"
 KEY_RATE_LIMIT      = "ratelimit:ip:{ip}"
 KEY_CAPTCHA_SESSION = "session:ip:{ip}:captcha"
 KEY_REQUEST_LOG     = "reqlog:id:{request_id}"   # fixed: was {req_id}, test uses request_id
+KEY_CORR_HISTORY    = "corr:hist:{ip}"            # cross-pipeline correlation ZSET
 
 # ── Pipeline Actions ──────────────────────────────────────────────────────────
 ACTION_ALLOW    = "ALLOW"

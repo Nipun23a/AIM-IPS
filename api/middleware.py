@@ -30,6 +30,7 @@ from firewall.regex_filter import RegexFilter
 from utils.redis_client import RedisClient
 from utils import redis_threat_store
 from response.engine import ResponseEngine
+from pipeline.correlation import record_and_correlate, LAYER_APPLICATION
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,30 @@ class IPSMiddleware(BaseHTTPMiddleware):
             ctx.add_score(LayerScore.clean(LAYER_0))
 
         decision, detail = self.response_engine.decide(ctx)
+
+        # ── Cross-pipeline temporal correlation ────────────────────
+        # After fusion score is set, check if this IP has attacks from
+        # BOTH network and application layers → amplify score if so.
+        r = self.redis
+        if r is not None and not ctx.short_circuited and ctx.final_score > 0.05:
+            app_label = self._best_attack_label(ctx)
+            corr = record_and_correlate(
+                r.raw, ctx.ip, LAYER_APPLICATION, app_label, ctx.final_score
+            )
+            if corr["correlated"] and corr["amplified_score"] > ctx.final_score:
+                ctx.final_score = corr["amplified_score"]
+                new_decision, new_action = self.response_engine._score_to_action(ctx.final_score)
+                if new_decision != decision:
+                    ctx.action  = new_action
+                    decision    = new_decision
+                    if new_decision == FirewallDecision.BLOCK:
+                        ctx.block_reason = (
+                            f"cross-pipeline correlation "
+                            f"(multiplier={corr['multiplier']}x, "
+                            f"types={corr['distinct_types']})"
+                        )
+                        self.response_engine._handle_block(ctx.ip, ctx.block_reason)
+
         asyncio.ensure_future(self._log_async(ctx))   # fire-and-forget
         return await self._apply_action(ctx, decision, request, call_next)
     
@@ -231,16 +256,13 @@ class IPSMiddleware(BaseHTTPMiddleware):
     
 
     async def _log_async(self, ctx: RequestContext) -> None:
-        """Fire-and-forget: log to Redis without blocking the response."""
+        """Fire-and-forget: all Redis/PostgreSQL writes happen here, never in the hot path."""
         try:
             if self.redis:
                 self.redis.log_request_scores(ctx.request_id, ctx.to_log_dict())
         except Exception as e:
             logger.error("[Middleware] Async log error: %s", e)
 
-        # Push to admin events list (24 h TTL, max 10 000 events)
-        # Also enqueue to db:queue for the background DB writer (fire-and-forget,
-        # zero pipeline coupling — actual DB write happens in a separate async task).
         try:
             if self.redis:
                 event = ctx.to_log_dict()
@@ -250,11 +272,26 @@ class IPSMiddleware(BaseHTTPMiddleware):
                 pipe.lpush("admin:events", raw_event)
                 pipe.ltrim("admin:events", 0, 9999)
                 pipe.expire("admin:events", 86400)
-                pipe.lpush("db:queue", raw_event)   # picked up by DBWriter
-                pipe.ltrim("db:queue", 0, 49999)    # cap queue at 50k events
+                pipe.lpush("db:queue", raw_event)       # picked up by DBWriter
+                pipe.ltrim("db:queue", 0, 49999)
+
+                # Enqueue blacklist audit entry if this request was blocked
+                if ctx.action == "BLOCK" and ctx.ip:
+                    from shared.constants import TTL_BLACKLIST_TEMP
+                    bl_payload = json.dumps({
+                        "ip":          ctx.ip,
+                        "reason":      ctx.block_reason or "blocked",
+                        "permanent":   False,
+                        "source":      "correlation" if "correlation" in (ctx.block_reason or "") else "auto",
+                        "timestamp":   round(ctx.timestamp, 3),
+                        "ttl_seconds": TTL_BLACKLIST_TEMP,
+                    })
+                    pipe.lpush("db:blacklist:queue", bl_payload)
+                    pipe.ltrim("db:blacklist:queue", 0, 9999)
+
                 pipe.execute()
         except Exception as e:
-            logger.error("[Middleware] Admin event push error: %s", e)
+            logger.error("[Middleware] Async log error: %s", e)
     
     async def _apply_action(
         self,
@@ -351,6 +388,13 @@ class IPSMiddleware(BaseHTTPMiddleware):
             timestamp    = time.time(),
             request_id   = str(uuid.uuid4()),
         )
+
+    def _best_attack_label(self, ctx: RequestContext) -> str:
+        """Return the most specific non-benign label seen in layer scores."""
+        for ls in reversed(ctx.layer_scores):
+            if ls.label and ls.label not in NORMAL_LABELS and ls.label not in ("suspicious", ""):
+                return ls.label
+        return "unknown"
 
     def _ctx_to_dict(self, ctx: RequestContext) -> dict:
         return {

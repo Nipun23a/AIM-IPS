@@ -18,7 +18,7 @@ from pipeline.application_level.layer2 import Layer2MLOrchestrator
 from api.middleware import IPSMiddleware
 from utils.redis_client import RedisClient
 import db.reader as db_reader
-from db.writer import run_db_writer
+from db.writer import run_db_writer, run_blacklist_writer
 from firewall.engine import StaticFirewall
 from firewall.regex_filter import RegexFilter
 from firewall.decisions import FirewallDecision
@@ -102,10 +102,13 @@ async def lifespan(app:FastAPI):
     # Pops events from Redis db:queue and batch-inserts to PostgreSQL.
     # Completely decoupled from the request pipeline — zero latency impact.
     writer_task = None
+    blacklist_writer_task = None
     try:
         r = RedisClient.get_redis()
-        writer_task = asyncio.ensure_future(run_db_writer(r.raw))
+        writer_task           = asyncio.ensure_future(run_db_writer(r.raw))
+        blacklist_writer_task = asyncio.ensure_future(run_blacklist_writer(r.raw))
         logger.info("[Startup] DB writer task started ✓")
+        logger.info("[Startup] Blacklist writer task started ✓")
     except Exception as e:
         logger.warning("[Startup] DB writer could not start: %s", e)
 
@@ -117,6 +120,8 @@ async def lifespan(app:FastAPI):
     logger.info("[Shutdown] AIM-IPS shutting down")
     if writer_task:
         writer_task.cancel()
+    if blacklist_writer_task:
+        blacklist_writer_task.cancel()
 
 
 app = FastAPI(

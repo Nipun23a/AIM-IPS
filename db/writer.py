@@ -29,7 +29,8 @@ DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql://postgres:postgres@localhost:5432/aimips",
 )
-REDIS_QUEUE  = "db:queue"
+REDIS_QUEUE           = "db:queue"
+REDIS_BLACKLIST_QUEUE = "db:blacklist:queue"
 BATCH_SIZE   = 50       # flush when buffer reaches this many events
 FLUSH_EVERY  = 5.0      # flush at most every N seconds regardless of batch size
 POLL_SLEEP   = 0.2      # seconds between Redis polls when queue is empty
@@ -175,4 +176,76 @@ async def run_db_writer(redis_raw) -> None:
 
         except Exception as e:
             logger.error("[DBWriter] Unexpected error: %s", e, exc_info=True)
+            await asyncio.sleep(1)
+
+
+# ── Blacklist writer ───────────────────────────────────────────────────────────
+
+_BLACKLIST_SQL = """
+    INSERT INTO blacklisted_ips (ip, reason, permanent, source, blocked_at, expires_at)
+    VALUES ($1, $2, $3, $4, to_timestamp($5), $6)
+    ON CONFLICT (ip) DO UPDATE
+        SET reason       = EXCLUDED.reason,
+            permanent    = EXCLUDED.permanent,
+            source       = EXCLUDED.source,
+            blocked_at   = EXCLUDED.blocked_at,
+            expires_at   = EXCLUDED.expires_at,
+            unblocked_at = NULL
+"""
+
+
+async def run_blacklist_writer(redis_raw) -> None:
+    """
+    Background loop: pops blacklist events from Redis queue and upserts
+    into the blacklisted_ips PostgreSQL table for audit trail.
+
+    Queue key:  db:blacklist:queue
+    Payload:    {"ip", "reason", "permanent", "source", "timestamp"}
+    """
+    conn = await _connect()
+    logger.info("[BlacklistWriter] Started — polling '%s'", REDIS_BLACKLIST_QUEUE)
+
+    while True:
+        try:
+            raw = redis_raw.rpop(REDIS_BLACKLIST_QUEUE)
+            if not raw:
+                await asyncio.sleep(POLL_SLEEP)
+                continue
+
+            try:
+                event = json.loads(raw)
+            except Exception:
+                continue
+
+            if conn is None or conn.is_closed():
+                conn = await _connect()
+            if conn is None:
+                logger.warning("[BlacklistWriter] PostgreSQL unavailable — entry dropped")
+                continue
+
+            permanent  = bool(event.get("permanent", False))
+            ts         = float(event.get("timestamp") or time.time())
+            ttl        = event.get("ttl_seconds")
+            expires_at = None
+            if not permanent and ttl:
+                from datetime import datetime, timezone, timedelta
+                expires_at = datetime.fromtimestamp(ts, tz=timezone.utc) + timedelta(seconds=int(ttl))
+
+            await conn.execute(
+                _BLACKLIST_SQL,
+                str(event.get("ip", ""))[:45],
+                str(event.get("reason", ""))[:500],
+                permanent,
+                str(event.get("source", "auto"))[:50],
+                ts,
+                expires_at,
+            )
+            logger.debug("[BlacklistWriter] Upserted blacklist entry for %s", event.get("ip"))
+
+        except asyncpg.PostgresConnectionStatusError:
+            logger.warning("[BlacklistWriter] PostgreSQL connection lost — reconnecting…")
+            conn = await _connect()
+
+        except Exception as e:
+            logger.error("[BlacklistWriter] Unexpected error: %s", e, exc_info=True)
             await asyncio.sleep(1)

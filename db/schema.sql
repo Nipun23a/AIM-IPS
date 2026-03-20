@@ -54,6 +54,23 @@ CREATE INDEX IF NOT EXISTS idx_ae_best_label  ON attack_events (best_label);
 -- Composite: filter by action within a time window (used by stats API)
 CREATE INDEX IF NOT EXISTS idx_ae_action_time ON attack_events (action, event_time DESC);
 
+-- ── Blacklisted IPs audit table ───────────────────────────────
+CREATE TABLE IF NOT EXISTS blacklisted_ips (
+    id           BIGSERIAL    PRIMARY KEY,
+    ip           VARCHAR(45)  NOT NULL,
+    reason       TEXT         NOT NULL DEFAULT '',
+    permanent    BOOLEAN      NOT NULL DEFAULT FALSE,
+    source       VARCHAR(50)  NOT NULL DEFAULT 'auto',   -- auto | manual | correlation
+    blocked_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    expires_at   TIMESTAMPTZ,                            -- NULL = permanent
+    unblocked_at TIMESTAMPTZ                             -- NULL = still active
+);
+
+CREATE INDEX IF NOT EXISTS idx_bl_ip         ON blacklisted_ips (ip);
+CREATE INDEX IF NOT EXISTS idx_bl_blocked_at ON blacklisted_ips (blocked_at DESC);
+CREATE INDEX IF NOT EXISTS idx_bl_active     ON blacklisted_ips (ip, unblocked_at)
+    WHERE unblocked_at IS NULL;
+
 -- ── Utility views ─────────────────────────────────────────────
 
 -- Last 24 hours (dashboard default window)

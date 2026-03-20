@@ -187,6 +187,14 @@ class NetworkClassifier:
             confidence     = max(lgbm_score, ensemble_score),
         )
 
+        # Record in cross-pipeline correlation history so the application
+        # layer can detect network-recon → app-exploit sequences.
+        if is_threat and attack_type not in (LABEL_CLEAN,):
+            r = self.redis
+            if r is not None:
+                from pipeline.correlation import record_and_correlate, LAYER_NETWORK
+                record_and_correlate(r.raw, src_ip, LAYER_NETWORK, attack_type, fused)
+
         if is_threat:
             logger.warning(
                 "[NetClassifier] THREAT %s -> %s  "

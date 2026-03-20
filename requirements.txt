@@ -1,7 +1,7 @@
 pandas>=1.4
 numpy>=1.22
 scikit-learn>=1.0
-tensorflow[and-cuda]>=2.15
+tensorflow
 joblib>=1.2
 fastapi>=0.95
 uvicorn>=0.22
@@ -15,4 +15,6 @@ redis
 asyncpg>=0.29
 python-dotenv>=1.0
 httpx>=0.27
+asyncpg
+dotenv
 websockets>=12.0

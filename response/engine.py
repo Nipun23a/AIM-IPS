@@ -157,7 +157,8 @@ class ResponseEngine:
         return f"Detected {top.label} (layer={top.layer}, score={top.score:.2f})"
 
     def _handle_block(self, ip: str, reason: str) -> None:
-        """Auto-blacklist on BLOCK if Redis is available."""
+        """Write IP to Redis blacklist only — fast, stays in critical path.
+        PostgreSQL audit trail is handled separately in middleware._log_async()."""
         if self.auto_blacklist and self.redis:
             self.redis.blacklist_ip(ip, reason=reason, permanent=False)
     

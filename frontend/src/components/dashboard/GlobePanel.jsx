@@ -180,7 +180,7 @@ export default function GlobePanel({ events }) {
     setLoading(true);
     Promise.allSettled(
       uniqueIps.map(([ip]) =>
-        fetch(`http://ip-api.com/json/${ip}?fields=query,lat,lon,country,countryCode`)
+        fetch(`https://ip-api.com/json/${ip}?fields=query,lat,lon,country,countryCode`)
           .then((r) => r.json())
       )
     ).then((results) => {

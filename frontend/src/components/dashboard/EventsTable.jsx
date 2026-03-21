@@ -1,5 +1,6 @@
 import ActionPill from "../common/ActionPill";
 import { fmtTime, scoreTextColor } from "../../utils/helpers";
+import { displayLabel } from "../../constants";
 
 export default function EventsTable({ events, paused, onPause, onSelectEvent }) {
   return (
@@ -48,7 +49,7 @@ export default function EventsTable({ events, paused, onPause, onSelectEvent }) 
                     {(e.final_score || 0).toFixed(3)}
                   </td>
                   <td className="py-2 px-3"><ActionPill action={e.action} /></td>
-                  <td className="py-2 px-3 text-slate-400 text-xs">{e.best_label || e.block_reason || ""}</td>
+                  <td className="py-2 px-3 text-slate-400 text-xs">{displayLabel(e.best_label || e.block_reason || "")}</td>
                   <td className="py-2 px-3 text-slate-500 text-xs">{e.latency_ms != null ? `${e.latency_ms}ms` : ""}</td>
                 </tr>
               ))

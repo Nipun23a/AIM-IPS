@@ -4,7 +4,7 @@ import {
   Line as MapLine, Marker,
 } from "react-simple-maps";
 import Globe from "globe.gl";
-import { SERVER_LOC } from "../../constants";
+import { SERVER_LOC, displayLabel } from "../../constants";
 
 const GEO_URL   = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
 const FLAG_BASE = "https://flagcdn.com/20x15";
@@ -189,7 +189,7 @@ export default function GlobePanel({ events }) {
       results.forEach(({ status, value: g }) => {
         if (status !== "fulfilled" || !g?.latitude || !g?.longitude) return;
         const ev    = seen.get(g.ip) || {};
-        const label = ev.best_label || ev.block_reason || "threat";
+        const label = displayLabel(ev.best_label || ev.block_reason || "threat");
         const color = colorFor(label);
         newFeed.push({
           ip: g.ip, country: g.country || "Unknown",

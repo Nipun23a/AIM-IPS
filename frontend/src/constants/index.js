@@ -44,3 +44,9 @@ export const LAYER_META = [
 
 export const ADMIN_USERNAME = import.meta.env.VITE_ADMIN_USERNAME ?? "admin";
 export const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD ?? "aimips2024";
+
+/** Normalize attack labels for display — "unknown" shows as "zero-day" */
+export function displayLabel(label) {
+  if (!label) return "";
+  return label === "unknown" ? "zero-day" : label;
+}

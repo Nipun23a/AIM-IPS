@@ -295,10 +295,12 @@ class IPSMiddleware(BaseHTTPMiddleware):
         except Exception as e:
             logger.error("[Middleware] Async log error: %s", e)
 
-        # ── AI deep analysis enqueue (covers ALL paths, including short-circuited) ──
-        # Moved here from dispatch() so Layer 0/1 blocks are also analysed.
-        # was_hard_blocked() covers L0/L1 short-circuits where final_score is never set (stays 0.0).
-        if (ctx.final_score >= AI_ANALYSIS_THRESHOLD or ctx.was_hard_blocked()) and self.redis:
+        # ── AI deep analysis enqueue (ML detections only) ────────────────────────
+        # Only enqueue when the ML fusion pipeline produced a high score.
+        # Layer 0/1 hard-blocks are already fully explained by their rule match —
+        # Claude adds no value there. final_score is only set by ResponseEngine
+        # (reached only when L0/L1 do NOT short-circuit).
+        if ctx.final_score >= AI_ANALYSIS_THRESHOLD and not ctx.short_circuited and self.redis:
             try:
                 threat_event = build_threat_event(ctx)
                 queue = ThreatAnalysisQueue(self.redis.raw)

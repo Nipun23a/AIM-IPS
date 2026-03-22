@@ -19,6 +19,7 @@ from api.middleware import IPSMiddleware
 from utils.redis_client import RedisClient
 import db.reader as db_reader
 from db.writer import run_db_writer, run_blacklist_writer
+from ai.worker import run_ai_analysis_worker
 from firewall.engine import StaticFirewall
 from firewall.regex_filter import RegexFilter
 from firewall.decisions import FirewallDecision
@@ -103,14 +104,17 @@ async def lifespan(app:FastAPI):
     # Completely decoupled from the request pipeline — zero latency impact.
     writer_task = None
     blacklist_writer_task = None
+    ai_worker_task = None
     try:
         r = RedisClient.get_redis()
         writer_task           = asyncio.ensure_future(run_db_writer(r.raw))
         blacklist_writer_task = asyncio.ensure_future(run_blacklist_writer(r.raw))
+        ai_worker_task        = asyncio.ensure_future(run_ai_analysis_worker(r.raw))
         logger.info("[Startup] DB writer task started ✓")
         logger.info("[Startup] Blacklist writer task started ✓")
+        logger.info("[Startup] AI analysis worker task started ✓")
     except Exception as e:
-        logger.warning("[Startup] DB writer could not start: %s", e)
+        logger.warning("[Startup] Background tasks could not start: %s", e)
 
     logger.info("[Startup] AIM-IPS Ready ✓")
     logger.info("=" * 60)
@@ -122,6 +126,8 @@ async def lifespan(app:FastAPI):
         writer_task.cancel()
     if blacklist_writer_task:
         blacklist_writer_task.cancel()
+    if ai_worker_task:
+        ai_worker_task.cancel()
 
 
 app = FastAPI(
@@ -135,7 +141,8 @@ app.add_middleware(
     IPSMiddleware,
     skip_paths=[
         "/health", "/docs", "/openapi.json", "/redoc", "/status", "/demo",
-        "/api/inspect", "/api/stats", "/api/events", "/api/admin", "/api/myip", "/api/geoip",
+        "/api/inspect", "/api/stats", "/api/events", "/api/admin",
+        "/api/myip", "/api/geoip", "/api/ai-analysis",
     ],
 )
 
@@ -782,6 +789,82 @@ async def api_events(
                 )
 
     return {"events": events, "total": len(events)}
+
+
+# ── /api/ai-analysis — AI deep threat analysis ────────────────────────────────
+
+class _TriggerAnalysisRequest(BaseModel):
+    event_id:   str
+    ip_address: str = ""
+    method:     str = "GET"
+    url:        str = "/"
+    payload:    str = ""
+    attack_type: str = "unknown"
+    action_taken: str = "BLOCK"
+    detection_scores: dict = {}
+    shap_explanation: dict = {}
+    correlation_context: dict = {}
+
+
+@app.get("/api/ai-analysis/{event_id}")
+async def get_ai_analysis(event_id: str):
+    """
+    Fetch cached AI analysis result for a threat event.
+
+    Returns:
+        {"status": "pending"}   — queued but not yet complete
+        {"status": "complete", ...}  — full analysis
+        {"status": "not_found"} — event was below analysis threshold or not found
+    """
+    try:
+        r = RedisClient.get_redis()
+        from ai.threat_analysis import ThreatAnalysisQueue
+        queue = ThreatAnalysisQueue(r.raw)
+        result = queue.get_result(event_id)
+        if result is None:
+            return {"status": "not_found"}
+        return result
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.post("/api/ai-analysis")
+async def trigger_ai_analysis(req: _TriggerAnalysisRequest):
+    """
+    Manually trigger AI analysis for an event (e.g. from the dashboard
+    for events that were below the auto-enqueue threshold).
+
+    The analysis runs asynchronously; poll GET /api/ai-analysis/{event_id}
+    for the result (usually ready in 5-10 seconds).
+    """
+    try:
+        r = RedisClient.get_redis()
+        from ai.threat_analysis import ThreatAnalysisQueue
+        queue = ThreatAnalysisQueue(r.raw)
+
+        # Don't re-queue if already pending/complete
+        existing = queue.get_result(req.event_id)
+        if existing and existing.get("status") in ("pending", "complete"):
+            return {"queued": False, "reason": "already_processing", "status": existing.get("status")}
+
+        threat_event = {
+            "event_id":           req.event_id,
+            "timestamp":          time.time(),
+            "ip_address":         req.ip_address,
+            "url":                req.url,
+            "method":             req.method,
+            "payload":            req.payload[:500],
+            "attack_type":        req.attack_type,
+            "action_taken":       req.action_taken,
+            "detection_scores":   req.detection_scores,
+            "shap_explanation":   req.shap_explanation,
+            "correlation_context": req.correlation_context,
+        }
+        queue.mark_pending(req.event_id)
+        queue.enqueue_threat(threat_event)
+        return {"queued": True, "event_id": req.event_id}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 # ── /api/admin/block-ip ────────────────────────────────────────────────────────

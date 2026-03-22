@@ -31,6 +31,7 @@ from utils.redis_client import RedisClient
 from utils import redis_threat_store
 from response.engine import ResponseEngine
 from pipeline.correlation import record_and_correlate, LAYER_APPLICATION
+from ai.threat_analysis import ThreatAnalysisQueue, AI_ANALYSIS_THRESHOLD, build_threat_event
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +135,21 @@ class IPSMiddleware(BaseHTTPMiddleware):
                         self.response_engine._handle_block(ctx.ip, ctx.block_reason)
 
         asyncio.ensure_future(self._log_async(ctx))   # fire-and-forget
+
+        # ── Async AI deep analysis (non-blocking) ───────────────────────
+        # Only queue threats above captcha/block threshold to control API cost.
+        # The worker picks this up and calls Claude in a thread-pool executor.
+        if ctx.final_score >= AI_ANALYSIS_THRESHOLD:
+            r = self.redis
+            if r is not None:
+                try:
+                    threat_event = build_threat_event(ctx)
+                    queue = ThreatAnalysisQueue(r.raw)
+                    queue.mark_pending(ctx.request_id)
+                    queue.enqueue_threat(threat_event)
+                except Exception as _e:
+                    pass  # never block the request path
+
         return await self._apply_action(ctx, decision, request, call_next)
     
 

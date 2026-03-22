@@ -122,3 +122,57 @@ FROM   v_events_24h,
 WHERE  (ls->>'triggered')::boolean = TRUE
 GROUP  BY 1
 ORDER  BY cnt DESC;
+
+-- ── AI Threat Analysis table ──────────────────────────────────
+-- Stores Claude-generated deep analysis for high-confidence threats.
+-- Populated asynchronously by the AI worker; never in the request path.
+CREATE TABLE IF NOT EXISTS threat_analyses (
+    id                    BIGSERIAL       PRIMARY KEY,
+    event_id              VARCHAR(36)     NOT NULL,           -- links to attack_events.request_id
+    analysis_timestamp    TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+
+    -- Classification (from Claude)
+    attack_type           VARCHAR(100)    NOT NULL DEFAULT '',
+    owasp_category        VARCHAR(200)    NOT NULL DEFAULT '',
+    severity              VARCHAR(20)     NOT NULL DEFAULT 'MEDIUM',
+    confidence            REAL            NOT NULL DEFAULT 0,
+    is_novel_variant      BOOLEAN         NOT NULL DEFAULT FALSE,
+
+    -- MITRE ATT&CK
+    mitre_id              VARCHAR(20)     NOT NULL DEFAULT '',
+    mitre_name            VARCHAR(200)    NOT NULL DEFAULT '',
+    mitre_tactic          VARCHAR(100)    NOT NULL DEFAULT '',
+    kill_chain_phase      VARCHAR(100)    NOT NULL DEFAULT '',
+
+    -- Analysis text
+    root_cause_analysis   TEXT            NOT NULL DEFAULT '',
+    attack_sophistication VARCHAR(50)     NOT NULL DEFAULT '',
+    analyst_summary       TEXT            NOT NULL DEFAULT '',
+
+    -- Structured recommendations (JSONB arrays)
+    evasion_techniques    JSONB           NOT NULL DEFAULT '[]',
+    waf_rules             JSONB           NOT NULL DEFAULT '[]',
+    regex_patterns        JSONB           NOT NULL DEFAULT '[]',
+    threshold_adjustments JSONB           NOT NULL DEFAULT '{}',
+    immediate_actions     JSONB           NOT NULL DEFAULT '[]',
+    long_term_fixes       JSONB           NOT NULL DEFAULT '[]',
+    iocs                  JSONB           NOT NULL DEFAULT '[]',
+
+    -- Threat intelligence context
+    global_prevalence     VARCHAR(20)     NOT NULL DEFAULT 'isolated',
+    honeydb_count         INT             NOT NULL DEFAULT 0,
+    abuseipdb_score       INT             NOT NULL DEFAULT 0,
+
+    -- Full raw analysis for future re-parsing
+    full_analysis         JSONB           NOT NULL DEFAULT '{}',
+
+    created_at            TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT uq_ta_event_id UNIQUE (event_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ta_event_id         ON threat_analyses (event_id);
+CREATE INDEX IF NOT EXISTS idx_ta_severity         ON threat_analyses (severity);
+CREATE INDEX IF NOT EXISTS idx_ta_analysis_time    ON threat_analyses (analysis_timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_ta_novel            ON threat_analyses (is_novel_variant) WHERE is_novel_variant = TRUE;
+CREATE INDEX IF NOT EXISTS idx_ta_attack_type      ON threat_analyses (attack_type);

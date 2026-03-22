@@ -134,21 +134,7 @@ class IPSMiddleware(BaseHTTPMiddleware):
                         )
                         self.response_engine._handle_block(ctx.ip, ctx.block_reason)
 
-        asyncio.ensure_future(self._log_async(ctx))   # fire-and-forget
-
-        # ── Async AI deep analysis (non-blocking) ───────────────────────
-        # Only queue threats above captcha/block threshold to control API cost.
-        # The worker picks this up and calls Claude in a thread-pool executor.
-        if ctx.final_score >= AI_ANALYSIS_THRESHOLD:
-            r = self.redis
-            if r is not None:
-                try:
-                    threat_event = build_threat_event(ctx)
-                    queue = ThreatAnalysisQueue(r.raw)
-                    queue.mark_pending(ctx.request_id)
-                    queue.enqueue_threat(threat_event)
-                except Exception as _e:
-                    pass  # never block the request path
+        asyncio.ensure_future(self._log_async(ctx))   # fire-and-forget (includes AI enqueue)
 
         return await self._apply_action(ctx, decision, request, call_next)
     
@@ -308,6 +294,19 @@ class IPSMiddleware(BaseHTTPMiddleware):
                 pipe.execute()
         except Exception as e:
             logger.error("[Middleware] Async log error: %s", e)
+
+        # ── AI deep analysis enqueue (covers ALL paths, including short-circuited) ──
+        # Moved here from dispatch() so Layer 0/1 blocks are also analysed.
+        if ctx.final_score >= AI_ANALYSIS_THRESHOLD and self.redis:
+            try:
+                threat_event = build_threat_event(ctx)
+                queue = ThreatAnalysisQueue(self.redis.raw)
+                queue.mark_pending(ctx.request_id)
+                queue.enqueue_threat(threat_event)
+                logger.debug("[Middleware] AI analysis enqueued for %s (score=%.3f)",
+                             ctx.request_id, ctx.final_score)
+            except Exception as _e:
+                logger.debug("[Middleware] AI enqueue error: %s", _e)
     
     async def _apply_action(
         self,

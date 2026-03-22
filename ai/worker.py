@@ -108,6 +108,26 @@ async def run_ai_analysis_worker(redis_raw, db_pool=None) -> None:
             # ── Store in Redis (immediate dashboard access) ───────────────
             queue.store_result(event_id, analysis)
 
+            # ── Push adaptive regex rules back into Layer 1 ───────────────
+            try:
+                from ai.adaptive_rules import AdaptiveRuleStore
+                tc       = analysis.get("threat_classification") or {}
+                severity = tc.get("severity", "MEDIUM")
+                patterns = (analysis.get("mitigation_recommendations") or {}).get("regex_patterns") or []
+                if patterns and severity in ("CRITICAL", "HIGH"):
+                    store = AdaptiveRuleStore(redis_raw)
+                    accepted = store.push_patterns(
+                        patterns    = patterns,
+                        attack_type = tc.get("attack_type", "unknown"),
+                        event_id    = event_id,
+                        severity    = severity,
+                        confidence  = float(tc.get("confidence", 0)),
+                    )
+                    if accepted:
+                        logger.info("[AIWorker] Adaptive rules added: %s", accepted)
+            except Exception as _ae:
+                logger.debug("[AIWorker] Adaptive rule push error: %s", _ae)
+
             # ── Store in PostgreSQL (persistent audit trail) ──────────────
             if db_pool:
                 try:

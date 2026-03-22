@@ -8,6 +8,7 @@ import AiThreatAnalysis      from "../components/dashboard/AiThreatAnalysis";
 import EventsTable           from "../components/dashboard/EventsTable";
 import EventDetailModal      from "../components/dashboard/EventDetailModal";
 import BlockedIPsModal       from "../components/dashboard/BlockedIPsModal";
+import AdaptiveRulesPanel    from "../components/dashboard/AdaptiveRulesPanel";
 
 const LiveClock = memo(function LiveClock() {
   const [clock, setClock] = useState(() =>
@@ -153,6 +154,8 @@ export default function AdminDashboardPage() {
         <TopThreatIPs stats={stats} onLoadBlocked={loadBlockedIPs} />
 
         <AiThreatAnalysis stats={stats} events={allEvents} />
+
+        <AdaptiveRulesPanel />
 
         <EventsTable
           events={filtered}

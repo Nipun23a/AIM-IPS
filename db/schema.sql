@@ -176,3 +176,27 @@ CREATE INDEX IF NOT EXISTS idx_ta_severity         ON threat_analyses (severity)
 CREATE INDEX IF NOT EXISTS idx_ta_analysis_time    ON threat_analyses (analysis_timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_ta_novel            ON threat_analyses (is_novel_variant) WHERE is_novel_variant = TRUE;
 CREATE INDEX IF NOT EXISTS idx_ta_attack_type      ON threat_analyses (attack_type);
+
+-- ── Adaptive Rules table ───────────────────────────────────────
+-- Persistent mirror of Redis adaptive:rules hash.
+-- Source of truth is Redis (hot path); this table is for audit/analytics.
+CREATE TABLE IF NOT EXISTS adaptive_rules (
+    id                BIGSERIAL       PRIMARY KEY,
+    rule_id           VARCHAR(8)      NOT NULL,
+    pattern           TEXT            NOT NULL,
+    attack_type       VARCHAR(50)     NOT NULL DEFAULT '',
+    source_event_id   VARCHAR(36),                          -- links to threat_analyses.event_id
+    severity          VARCHAR(20)     NOT NULL DEFAULT 'HIGH',
+    confidence        REAL            NOT NULL DEFAULT 0,
+    status            VARCHAR(20)     NOT NULL DEFAULT 'active',   -- active | rejected
+    match_count       INT             NOT NULL DEFAULT 0,
+    created_at        TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+    last_matched_at   TIMESTAMPTZ,
+
+    CONSTRAINT uq_ar_rule_id  UNIQUE (rule_id),
+    CONSTRAINT uq_ar_pattern  UNIQUE (pattern)              -- prevent exact duplicates
+);
+
+CREATE INDEX IF NOT EXISTS idx_ar_attack_type  ON adaptive_rules (attack_type);
+CREATE INDEX IF NOT EXISTS idx_ar_status       ON adaptive_rules (status);
+CREATE INDEX IF NOT EXISTS idx_ar_created_at   ON adaptive_rules (created_at DESC);

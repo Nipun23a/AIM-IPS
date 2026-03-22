@@ -105,14 +105,17 @@ async def lifespan(app:FastAPI):
     writer_task = None
     blacklist_writer_task = None
     ai_worker_task = None
+    adaptive_reload_task = None
     try:
         r = RedisClient.get_redis()
         writer_task           = asyncio.ensure_future(run_db_writer(r.raw))
         blacklist_writer_task = asyncio.ensure_future(run_blacklist_writer(r.raw))
         ai_worker_task        = asyncio.ensure_future(run_ai_analysis_worker(r.raw))
+        adaptive_reload_task  = asyncio.ensure_future(_run_adaptive_reload(r.raw, app))
         logger.info("[Startup] DB writer task started ✓")
         logger.info("[Startup] Blacklist writer task started ✓")
         logger.info("[Startup] AI analysis worker task started ✓")
+        logger.info("[Startup] Adaptive rules reload task started ✓")
     except Exception as e:
         logger.warning("[Startup] Background tasks could not start: %s", e)
 
@@ -128,6 +131,8 @@ async def lifespan(app:FastAPI):
         blacklist_writer_task.cancel()
     if ai_worker_task:
         ai_worker_task.cancel()
+    if adaptive_reload_task:
+        adaptive_reload_task.cancel()
 
 
 app = FastAPI(
@@ -142,7 +147,7 @@ app.add_middleware(
     skip_paths=[
         "/health", "/docs", "/openapi.json", "/redoc", "/status", "/demo",
         "/api/inspect", "/api/stats", "/api/events", "/api/admin",
-        "/api/myip", "/api/geoip", "/api/ai-analysis",
+        "/api/myip", "/api/geoip", "/api/ai-analysis", "/api/adaptive-rules",
     ],
 )
 
@@ -905,3 +910,81 @@ async def admin_blocked_ips():
         return {"blocked_ips": result, "count": len(result)}
     except Exception as e:
         return {"blocked_ips": [], "count": 0, "error": str(e)}
+
+
+# ── Adaptive Rules background reload ──────────────────────────────────────────
+
+async def _run_adaptive_reload(redis_raw, app_ref, interval: int = 30) -> None:
+    """
+    Every `interval` seconds, fetch active adaptive rules from Redis and
+    hot-reload them into the shared RegexFilter instance held by IPSMiddleware.
+    """
+    from ai.adaptive_rules import AdaptiveRuleStore
+    logger.info("[AdaptiveReload] Started — reloading every %ds", interval)
+    while True:
+        try:
+            await asyncio.sleep(interval)
+            # Find the IPSMiddleware instance via the app's middleware stack
+            regex_filter = None
+            for mw in getattr(app_ref, "middleware_stack", []):
+                if hasattr(mw, "app") and hasattr(mw.app, "_regex_filter"):
+                    regex_filter = mw.app._regex_filter
+                    break
+            # Walk deeper if needed
+            if regex_filter is None:
+                obj = app_ref
+                for _ in range(10):
+                    obj = getattr(obj, "app", None)
+                    if obj is None:
+                        break
+                    if hasattr(obj, "_regex_filter"):
+                        regex_filter = obj._regex_filter
+                        break
+
+            if regex_filter is None:
+                continue
+
+            store = AdaptiveRuleStore(redis_raw)
+            rules = store.get_active_rules()
+            regex_filter.load_adaptive_rules(rules)
+
+        except asyncio.CancelledError:
+            logger.info("[AdaptiveReload] Shutting down")
+            break
+        except Exception as e:
+            logger.error("[AdaptiveReload] Error: %s", e)
+
+
+# ── /api/adaptive-rules ────────────────────────────────────────────────────────
+
+@app.get("/api/adaptive-rules")
+async def get_adaptive_rules():
+    """Return all adaptive rules stored in Redis (active + rejected)."""
+    try:
+        from ai.adaptive_rules import AdaptiveRuleStore
+        r = RedisClient.get_redis()
+        store = AdaptiveRuleStore(r.raw)
+        rules = store.get_all_rules()
+        active   = [r for r in rules if r.get("status") == "active"]
+        rejected = [r for r in rules if r.get("status") == "rejected"]
+        return {
+            "rules":    rules,
+            "active":   len(active),
+            "rejected": len(rejected),
+            "total":    len(rules),
+        }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.delete("/api/adaptive-rules/{rule_id}")
+async def delete_adaptive_rule(rule_id: str):
+    """Remove an adaptive rule (reject it from the live filter)."""
+    try:
+        from ai.adaptive_rules import AdaptiveRuleStore
+        r = RedisClient.get_redis()
+        store = AdaptiveRuleStore(r.raw)
+        removed = store.remove_rule(rule_id)
+        return {"ok": removed, "rule_id": rule_id}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})

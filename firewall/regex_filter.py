@@ -93,6 +93,28 @@ CMDI_MEDIUM = [
 class RegexFilter:
     SCAN_HEADERS = {"referer", "x-forwarded-for", "user-agent", "x-custom-header"}
 
+    def __init__(self):
+        # List of (compiled_pattern, rule_id, attack_type) tuples.
+        # Replaced atomically by load_adaptive_rules() — GIL makes list
+        # assignment thread-safe without an explicit lock.
+        self._adaptive_patterns: list = []
+
+    def load_adaptive_rules(self, rules: list) -> None:
+        """
+        Hot-reload adaptive patterns from AdaptiveRuleStore.get_active_rules().
+        Called by the background reload task in main.py every 30 seconds.
+        """
+        new_patterns = []
+        for rule in rules:
+            try:
+                compiled = re.compile(rule["pattern"], re.IGNORECASE | re.DOTALL)
+                new_patterns.append((compiled, rule["rule_id"], rule.get("attack_type", "adaptive")))
+            except re.error:
+                pass
+        self._adaptive_patterns = new_patterns   # atomic replacement
+        if new_patterns:
+            logger.info("[RegexFilter] %d adaptive rule(s) loaded", len(new_patterns))
+
     def inspect(self,request:dict) -> Tuple[FirewallDecision,dict]:
         body         = str(request.get("body", "") or "")
         path         = str(request.get("path", "") or "")
@@ -176,8 +198,33 @@ class RegexFilter:
                     if best is None or confidence > best["confidence"]:
                         best = result
 
+        # ── Adaptive patterns (Claude-generated, hot-reloaded) ────────────────
+        for compiled, rule_id, attack_type in self._adaptive_patterns:
+            match = compiled.search(decoded)
+            if match:
+                result = {
+                    "pattern_group": attack_type,
+                    "pattern":       f"adaptive:{rule_id}",
+                    "confidence":    1.0,
+                    "matched_in":    field_name,
+                    "matched_text":  match.group(0)[:100],
+                    "decoded_input": decoded[:200],
+                    "adaptive":      True,
+                    "rule_id":       rule_id,
+                }
+                # Fire-and-forget match counter (best effort)
+                try:
+                    from utils.redis_client import RedisClient
+                    r = RedisClient.get_redis()
+                    if r:
+                        from ai.adaptive_rules import AdaptiveRuleStore
+                        AdaptiveRuleStore(r.raw).increment_match(rule_id)
+                except Exception:
+                    pass
+                return result   # always high-confidence → MITIGATE
+
         return best
-    
+
     def _decode_all(self, value: str) -> list:
         variants = set()
         variants.add(value)

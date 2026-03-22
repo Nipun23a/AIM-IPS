@@ -482,7 +482,7 @@ OUTPUT — strict JSON only (no markdown code fences, no text before/after):
     def _query_claude(self, prompt: str) -> str:
         response = self.client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=2000,
+            max_tokens=4096,
             temperature=0,
             messages=[{"role": "user", "content": prompt}],
         )

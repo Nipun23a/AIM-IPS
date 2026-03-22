@@ -10,6 +10,10 @@ import {
   Radio,
   Network,
   Activity,
+  Brain,
+  AlertTriangle,
+  FileSearch,
+  CheckCircle,
 } from "lucide-react";
 
 // ── Threat Correlation Animation ─────────────────────────────────────────────
@@ -149,6 +153,77 @@ function CorrelationDemo() {
 
 
 
+// ── AI Analysis Animation ─────────────────────────────────────────────────────────
+function AIAnalysisDemo() {
+  const [step, setStep] = useState(0);
+  const [animKey, setAnimKey] = useState(0);
+
+  useEffect(() => {
+    const timers = [
+      setTimeout(() => setStep(1), 600),
+      setTimeout(() => setStep(2), 1800),
+      setTimeout(() => setStep(3), 3200),
+      setTimeout(() => setStep(4), 4800),
+      setTimeout(() => { setStep(0); setAnimKey(k => k + 1); }, 8000),
+    ];
+    return () => timers.forEach(clearTimeout);
+  }, [animKey]);
+
+  const stages = [
+    { icon: AlertTriangle, color: "text-red-400",    bg: "bg-red-500/10 border-red-500/30",     label: "Threat detected",        sub: "score=1.0 · hard-block",       active: step >= 1 },
+    { icon: Brain,         color: "text-purple-400", bg: "bg-purple-500/10 border-purple-500/30", label: "Enqueued for Claude",   sub: "ai:threat:queue · Redis",      active: step >= 2 },
+    { icon: FileSearch,    color: "text-cyan-400",   bg: "bg-cyan-500/10 border-cyan-500/30",    label: "Threat Intel gathered",  sub: "HoneyDB · AbuseIPDB · MITRE",  active: step >= 3 },
+    { icon: CheckCircle,   color: "text-green-400",  bg: "bg-green-500/10 border-green-500/30",  label: "Claude analysis ready",  sub: "severity=CRITICAL · T1190",    active: step >= 4 },
+  ];
+
+  return (
+    <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6 md:p-8">
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
+          <span className="text-xs font-mono text-slate-400">ai_analysis_worker.py · live simulation</span>
+        </div>
+        <div className="text-xs text-slate-600 font-mono">auto-replay</div>
+      </div>
+
+      {/* Stage pipeline */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        {stages.map(({ icon: Icon, color, bg, label, sub, active }, i) => (
+          <div key={i} className={`rounded-xl border p-3 text-center transition-all duration-500 ${active ? bg : "bg-slate-800/40 border-slate-700/40 opacity-40"}`}>
+            <Icon className={`w-5 h-5 mx-auto mb-2 transition-colors duration-500 ${active ? color : "text-slate-600"}`} />
+            <div className={`text-xs font-semibold transition-colors duration-500 ${active ? "text-slate-200" : "text-slate-600"}`}>{label}</div>
+            <div className="text-xs text-slate-500 mt-0.5 font-mono">{sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Result card */}
+      <div className={`transition-all duration-700 ${step >= 4 ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"}`}>
+        <div className="border border-green-500/30 bg-green-500/5 rounded-xl p-4 font-mono text-xs space-y-1.5">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+            <span className="text-green-400 font-semibold">Claude Analysis Complete</span>
+            <span className="text-slate-600 ml-auto">~50s elapsed</span>
+          </div>
+          <div><span className="text-slate-500">attack_type   </span><span className="text-orange-300">SQL Injection — UNION-based</span></div>
+          <div><span className="text-slate-500">severity      </span><span className="text-red-400 font-bold">CRITICAL</span></div>
+          <div><span className="text-slate-500">mitre_id      </span><span className="text-cyan-300">T1190 · Exploit Public-Facing App</span></div>
+          <div><span className="text-slate-500">kill_chain    </span><span className="text-yellow-300">Exploitation</span></div>
+          <div><span className="text-slate-500">honeydb_hits  </span><span className="text-slate-300">638 reports</span></div>
+          <div><span className="text-slate-500">waf_rules     </span><span className="text-slate-300">6 ModSecurity rules generated</span></div>
+          <div><span className="text-slate-500">cached in     </span><span className="text-indigo-300">Redis ai:analysis:&#123;id&#125; · TTL=24h</span></div>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 mt-5 justify-center">
+        {[1,2,3,4].map((s) => (
+          <div key={s} className={`h-1 rounded-full transition-all duration-300 ${step >= s ? "w-8 bg-purple-500" : "w-3 bg-slate-700"}`} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Network layer pipeline steps ─────────────────────────────────────────────────
 const NET_STEPS = [
   { icon: Radio,    color: "text-cyan-400",   bg: "bg-cyan-500/10 border-cyan-500/30",    label: "Scapy captures",      sub: "raw packets on eth0" },
@@ -199,8 +274,8 @@ const FEATURES = [
     icon: Sparkles,
     color: "from-indigo-500/20 to-indigo-600/10 border-indigo-500/30",
     iconColor: "text-indigo-400",
-    title: "AI-Powered Analysis",
-    desc: "GPT-4o-mini integration explains every detected attack in plain language and recommends SOC response actions.",
+    title: "Autonomous AI Agent (Claude)",
+    desc: "Every high-severity threat is queued for deep analysis by Claude Sonnet — generating MITRE ATT&CK mappings, root cause analysis, ModSecurity WAF rules, and IOCs. Zero impact on request latency.",
   },
 ];
 
@@ -222,7 +297,8 @@ const TECH = [
   { name: "Redis",       color: "bg-red-900/40 text-red-300 border-red-700/40" },
   { name: "LightGBM",   color: "bg-orange-900/40 text-orange-300 border-orange-700/40" },
   { name: "PyTorch CNN", color: "bg-purple-900/40 text-purple-300 border-purple-700/40" },
-  { name: "GPT-4o",     color: "bg-emerald-900/40 text-emerald-300 border-emerald-700/40" },
+  { name: "Claude Sonnet", color: "bg-purple-900/40 text-purple-300 border-purple-700/40" },
+  { name: "Anthropic API", color: "bg-emerald-900/40 text-emerald-300 border-emerald-700/40" },
   { name: "Tailwind CSS",color: "bg-sky-900/40 text-sky-300 border-sky-700/40" },
 ];
 
@@ -511,6 +587,78 @@ export default function HomePage() {
                 <div className="text-xs text-slate-500 mt-1">{label}</div>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Autonomous AI Agent ──────────────────────────────────────────────── */}
+      <section className="px-4 py-20">
+        <div className="max-w-5xl mx-auto">
+          <div className="text-center mb-10">
+            <div className="text-xs text-purple-400 font-semibold uppercase tracking-widest mb-3">Autonomous AI Agent</div>
+            <h2 className="text-3xl md:text-4xl font-black text-white">Claude-Powered Threat Intelligence</h2>
+            <p className="text-slate-400 mt-3 max-w-2xl mx-auto">
+              Every blocked or high-severity request is automatically queued for deep analysis.
+              A background worker calls Claude Sonnet with full threat context — layer scores, SHAP weights,
+              HoneyDB reputation, and AbuseIPDB data — and returns a structured forensic report in seconds,
+              with zero impact on request latency.
+            </p>
+          </div>
+
+          <AIAnalysisDemo />
+
+          <div className="grid md:grid-cols-3 gap-4 mt-8">
+            {[
+              {
+                title: "MITRE ATT&CK Mapping",
+                desc: "Every attack is automatically mapped to a MITRE technique ID, tactic, and Cyber Kill Chain phase.",
+                color: "border-purple-500/30 bg-purple-500/5",
+                tag: "T1190 · T1059 · T1046",
+                tagColor: "text-purple-400",
+              },
+              {
+                title: "Threat Intelligence Fusion",
+                desc: "HoneyDB honeypot reputation and AbuseIPDB crowd-sourced abuse scores are merged into the analysis context.",
+                color: "border-cyan-500/30 bg-cyan-500/5",
+                tag: "HoneyDB · AbuseIPDB",
+                tagColor: "text-cyan-400",
+              },
+              {
+                title: "Actionable Mitigations",
+                desc: "Claude generates ready-to-deploy ModSecurity WAF rules, regex patterns, and ML threshold adjustment recommendations.",
+                color: "border-green-500/30 bg-green-500/5",
+                tag: "WAF rules · IOCs · fixes",
+                tagColor: "text-green-400",
+              },
+            ].map(({ title, desc, color, tag, tagColor }) => (
+              <div key={title} className={`rounded-xl border p-5 ${color}`}>
+                <div className={`text-xs font-mono mb-2 ${tagColor}`}>{tag}</div>
+                <h3 className="font-bold text-white text-sm mb-2">{title}</h3>
+                <p className="text-slate-400 text-xs leading-relaxed">{desc}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Architecture callout */}
+          <div className="mt-6 bg-slate-900 rounded-2xl border border-slate-800 p-5">
+            <div className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-3">How it stays non-blocking</div>
+            <div className="flex flex-col md:flex-row items-stretch gap-3 text-xs font-mono">
+              {[
+                { label: "Request blocked",   detail: "<3ms · middleware",       color: "text-red-400",    bg: "bg-red-500/10 border-red-500/20" },
+                { label: "Event enqueued",    detail: "Redis RPUSH · fire & forget", color: "text-yellow-400", bg: "bg-yellow-500/10 border-yellow-500/20" },
+                { label: "Worker dequeues",   detail: "ai:threat:queue · 0.5s poll", color: "text-cyan-400",   bg: "bg-cyan-500/10 border-cyan-500/20" },
+                { label: "Claude called",     detail: "thread executor · ~50s",  color: "text-purple-400", bg: "bg-purple-500/10 border-purple-500/20" },
+                { label: "Result cached",     detail: "Redis · 24h TTL · dashboard", color: "text-green-400",  bg: "bg-green-500/10 border-green-500/20" },
+              ].map(({ label, detail, color, bg }, i) => (
+                <div key={i} className="flex items-center gap-2 md:flex-1">
+                  <div className={`flex-1 rounded-lg border p-3 ${bg}`}>
+                    <div className={`font-semibold ${color}`}>{label}</div>
+                    <div className="text-slate-500 mt-0.5">{detail}</div>
+                  </div>
+                  {i < 4 && <span className="text-slate-600 flex-shrink-0 hidden md:block">→</span>}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </section>

@@ -297,7 +297,8 @@ class IPSMiddleware(BaseHTTPMiddleware):
 
         # ── AI deep analysis enqueue (covers ALL paths, including short-circuited) ──
         # Moved here from dispatch() so Layer 0/1 blocks are also analysed.
-        if ctx.final_score >= AI_ANALYSIS_THRESHOLD and self.redis:
+        # was_hard_blocked() covers L0/L1 short-circuits where final_score is never set (stays 0.0).
+        if (ctx.final_score >= AI_ANALYSIS_THRESHOLD or ctx.was_hard_blocked()) and self.redis:
             try:
                 threat_event = build_threat_event(ctx)
                 queue = ThreatAnalysisQueue(self.redis.raw)

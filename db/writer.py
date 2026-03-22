@@ -170,7 +170,7 @@ async def run_db_writer(redis_raw) -> None:
                 buffer.clear()
                 last_flush = now
 
-        except asyncpg.PostgresConnectionStatusError:
+        except asyncpg.PostgresConnectionError:
             logger.warning("[DBWriter] PostgreSQL connection lost — reconnecting…")
             conn = await _connect()
 
@@ -242,7 +242,7 @@ async def run_blacklist_writer(redis_raw) -> None:
             )
             logger.debug("[BlacklistWriter] Upserted blacklist entry for %s", event.get("ip"))
 
-        except asyncpg.PostgresConnectionStatusError:
+        except asyncpg.PostgresConnectionError:
             logger.warning("[BlacklistWriter] PostgreSQL connection lost — reconnecting…")
             conn = await _connect()
 

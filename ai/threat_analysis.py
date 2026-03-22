@@ -511,7 +511,7 @@ OUTPUT — strict JSON only (no markdown code fences, no text before/after):
             except json.JSONDecodeError:
                 pass
 
-        logger.warning("[AIAgent] Failed to parse Claude JSON response")
+        logger.warning("[AIAgent] Failed to parse Claude JSON response — raw: %.300s", text)
         return {
             "status":       "parse_error",
             "error":        "Failed to parse AI response",

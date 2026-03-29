@@ -474,6 +474,41 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* ── System Architecture Diagram ─────────────────────────────────────── */}
+      <section className="px-4 py-20">
+        <div className="max-w-6xl mx-auto">
+          <div className="text-center mb-10">
+            <div className="text-xs text-indigo-400 font-semibold uppercase tracking-widest mb-3">System Design</div>
+            <h2 className="text-3xl md:text-4xl font-black text-white">Full System Architecture</h2>
+            <p className="text-slate-400 mt-3 max-w-2xl mx-auto">
+              End-to-end view of how Internet traffic flows through the Application Layer IPS,
+              Network Layer IPS, Cross-Pipeline Correlation Engine, and AI Analysis Worker
+              before reaching the protected application.
+            </p>
+          </div>
+          <div className="bg-slate-900 rounded-2xl border border-slate-800 p-4 md:p-6 overflow-hidden">
+            <img
+              src="/architecture_diagram.png"
+              alt="AIM-IPS Full System Architecture Diagram"
+              className="w-full h-auto rounded-xl object-contain"
+            />
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 text-center text-xs">
+            {[
+              { label: "Application Layer IPS", sub: "HTTP Middleware · FastAPI ASGI", color: "border-blue-500/30 bg-blue-500/5 text-blue-400" },
+              { label: "Network Layer IPS",      sub: "Scapy · Async Background Process", color: "border-cyan-500/30 bg-cyan-500/5 text-cyan-400" },
+              { label: "Cross-Pipeline Engine",  sub: "Redis Sorted Set · 10s Window",   color: "border-red-500/30 bg-red-500/5 text-red-400" },
+              { label: "AI Analysis Worker",     sub: "Claude Sonnet · Zero Latency",     color: "border-purple-500/30 bg-purple-500/5 text-purple-400" },
+            ].map(({ label, sub, color }) => (
+              <div key={label} className={`rounded-xl border p-3 ${color}`}>
+                <div className="font-semibold text-slate-200 mb-1">{label}</div>
+                <div className="text-slate-500 font-mono">{sub}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* ── Network Layer ────────────────────────────────────────────────────── */}
       <section className="px-4 py-20">
         <div className="max-w-5xl mx-auto">

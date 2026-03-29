@@ -495,6 +495,46 @@ async def inspect_pipeline(req: InspectRequest, request: Request):
 
     asyncio.ensure_future(_push_inspect_event())
 
+    # ── AI enqueue — ML detections only (same rule as middleware) ─────────────
+    # Trigger when ML fusion score is high AND L0/L1 did not short-circuit.
+    # This mirrors the middleware condition so the Inspector behaves identically.
+    from ai.threat_analysis import AI_ANALYSIS_THRESHOLD
+    if not short_circuited and fused_score >= AI_ANALYSIS_THRESHOLD:
+        async def _enqueue_ai():
+            try:
+                r = RedisClient.get_redis()
+                from ai.threat_analysis import ThreatAnalysisQueue
+                best_lbl = lgbm_label or (l1_label if l1_label not in ("clean", None) else "unknown")
+                threat_event = {
+                    "event_id":    request_id,
+                    "timestamp":   start_time,
+                    "ip_address":  req.ip,
+                    "url":         req.path,
+                    "method":      req.method,
+                    "payload":     req.body[:500],
+                    "attack_type": best_lbl,
+                    "action_taken": final_action,
+                    "detection_scores": {
+                        "final_score":    fused_score,
+                        "lgbm_score":     lgbm_score_val,
+                        "cnn_score":      cnn_score_val,
+                        "network_score":  net_score,
+                        "regex_score":    l1_score,
+                    },
+                    "shap_explanation": {
+                        "lgbm_probs": lgbm_all_probs,
+                        "cnn_recon":  cnn_recon_score,
+                        "cnn_maha":   cnn_maha_score,
+                    },
+                    "source": "inspector",
+                }
+                queue = ThreatAnalysisQueue(r.raw)
+                queue.mark_pending(request_id)
+                queue.enqueue_threat(threat_event)
+            except Exception as _e:
+                logger.debug("[Inspect] AI enqueue failed: %s", _e)
+        asyncio.ensure_future(_enqueue_ai())
+
     result = {
         "request_id":      request_id,
         "latency_ms":      latency_ms,

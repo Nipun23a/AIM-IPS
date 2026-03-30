@@ -4,7 +4,7 @@ from typing import Tuple, Optional
 from firewall.decisions import FirewallDecision
 from shared.schemas import RequestContext,LayerScore
 from shared.constants import (
-    SCORE_ALLOW_MAX,SCORE_DEALY_MAX,SCORE_THROTTLE_MAX,SCORE_CAPTCHA_MAX,
+    SCORE_ALLOW_MAX,SCORE_DELAY_MAX,SCORE_THROTTLE_MAX,SCORE_CAPTCHA_MAX,
     WEIGHT_LAYER1_REGEX,WEIGHT_LAYER2_LGBM,WEIGHT_LAYER2_CNN,WEIGHT_NETWORK,
     LAYER_1,LAYER_2_LGBM,LAYER_2_CNN,LAYER_NETWORK,
     ACTION_ALLOW,ACTION_DELAY,ACTION_THROTTLE,ACTION_CAPTCHA,ACTION_BLOCK
@@ -78,7 +78,7 @@ class ResponseEngine:
             ctx.block_reason = reason
             self._handle_block(ctx.ip, reason)
         elif decision == FirewallDecision.CAPTCHA and self.redis:
-            self.redis.set_captcha_challenge(ctx.ip)
+            self.redis.set_captcha_session(ctx.ip)
 
         logger.info(
             f"[ResponseEngine] {ctx.ip} → {action_str} "
@@ -141,7 +141,7 @@ class ResponseEngine:
             return FirewallDecision.BLOCK,    ACTION_BLOCK
         elif score >= SCORE_THROTTLE_MAX:       # 0.65–0.85
             return FirewallDecision.CAPTCHA,  ACTION_CAPTCHA
-        elif score >= SCORE_DEALY_MAX:          # 0.50–0.65
+        elif score >= SCORE_DELAY_MAX:          # 0.50–0.65
             return FirewallDecision.THROTTLE, ACTION_THROTTLE
         elif score >= SCORE_ALLOW_MAX:          # 0.35–0.50
             return FirewallDecision.DELAY,    ACTION_DELAY
@@ -157,7 +157,8 @@ class ResponseEngine:
         return f"Detected {top.label} (layer={top.layer}, score={top.score:.2f})"
 
     def _handle_block(self, ip: str, reason: str) -> None:
-        """Auto-blacklist on BLOCK if Redis is available."""
+        """Write IP to Redis blacklist only — fast, stays in critical path.
+        PostgreSQL audit trail is handled separately in middleware._log_async()."""
         if self.auto_blacklist and self.redis:
             self.redis.blacklist_ip(ip, reason=reason, permanent=False)
     

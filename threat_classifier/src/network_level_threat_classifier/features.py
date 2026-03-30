@@ -1,4 +1,3 @@
-
 THREAT_FEATURES = [
     "flow duration",
     "total fwd packets",

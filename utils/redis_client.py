@@ -198,7 +198,7 @@ class RedisClient:
     def is_captcha_solved(self, ip:str) -> bool:
         key = KEY_CAPTCHA_SESSION.format(ip = ip)
         try:
-            self._client.get(key) == "solved"
+            return self._client.get(key) == "solved"
         except redis.RedisError :
             return False
     

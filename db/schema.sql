@@ -1,0 +1,202 @@
+-- ============================================================
+-- AIM-IPS  |  PostgreSQL Attack Events Schema
+-- ============================================================
+-- Run once:
+--   psql -U postgres -c "CREATE DATABASE aimips;"
+--   psql -U postgres -d aimips -f db/schema.sql
+-- ============================================================
+
+-- ── Main events table ─────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS attack_events (
+    id              BIGSERIAL           PRIMARY KEY,
+
+    -- Request identity
+    request_id      VARCHAR(36)         NOT NULL,
+    ip              VARCHAR(45)         NOT NULL,       -- supports IPv6
+    method          VARCHAR(10)         NOT NULL DEFAULT 'GET',
+    path            TEXT                NOT NULL DEFAULT '/',
+
+    -- Timing (epoch seconds from pipeline + derived timestamptz column)
+    timestamp       DOUBLE PRECISION    NOT NULL,
+    event_time      TIMESTAMPTZ         GENERATED ALWAYS AS (
+                        to_timestamp(timestamp)
+                    ) STORED,
+
+    -- Pipeline decision
+    final_score     REAL                NOT NULL DEFAULT 0,
+    action          VARCHAR(20)         NOT NULL DEFAULT 'ALLOW',
+    block_reason    TEXT                DEFAULT '',
+    short_circuited BOOLEAN             NOT NULL DEFAULT FALSE,
+    network_score   REAL                NOT NULL DEFAULT 0,
+    latency_ms      REAL,
+    best_label      VARCHAR(100)        DEFAULT 'unknown',
+
+    -- Per-layer scores (flat columns for fast aggregation)
+    regex_conf      REAL                DEFAULT 0,
+    app_lgbm_score  REAL                DEFAULT 0,
+    net_lgbm_score  REAL                DEFAULT 0,
+    deep_anomaly    REAL                DEFAULT 0,
+
+    -- Full layer detail (flexible JSON)
+    layer_scores    JSONB               NOT NULL DEFAULT '[]',
+
+    created_at      TIMESTAMPTZ         NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT uq_request_id UNIQUE (request_id)
+);
+
+-- ── Indexes for dashboard queries ─────────────────────────────
+CREATE INDEX IF NOT EXISTS idx_ae_ip          ON attack_events (ip);
+CREATE INDEX IF NOT EXISTS idx_ae_action      ON attack_events (action);
+CREATE INDEX IF NOT EXISTS idx_ae_event_time  ON attack_events (event_time DESC);
+CREATE INDEX IF NOT EXISTS idx_ae_timestamp   ON attack_events (timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_ae_best_label  ON attack_events (best_label);
+-- Composite: filter by action within a time window (used by stats API)
+CREATE INDEX IF NOT EXISTS idx_ae_action_time ON attack_events (action, event_time DESC);
+
+-- ── Blacklisted IPs audit table ───────────────────────────────
+CREATE TABLE IF NOT EXISTS blacklisted_ips (
+    id           BIGSERIAL    PRIMARY KEY,
+    ip           VARCHAR(45)  NOT NULL,
+    reason       TEXT         NOT NULL DEFAULT '',
+    permanent    BOOLEAN      NOT NULL DEFAULT FALSE,
+    source       VARCHAR(50)  NOT NULL DEFAULT 'auto',   -- auto | manual | correlation
+    blocked_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    expires_at   TIMESTAMPTZ,                            -- NULL = permanent
+    unblocked_at TIMESTAMPTZ                             -- NULL = still active
+);
+
+CREATE INDEX IF NOT EXISTS idx_bl_ip         ON blacklisted_ips (ip);
+CREATE INDEX IF NOT EXISTS idx_bl_blocked_at ON blacklisted_ips (blocked_at DESC);
+CREATE INDEX IF NOT EXISTS idx_bl_active     ON blacklisted_ips (ip, unblocked_at)
+    WHERE unblocked_at IS NULL;
+
+-- ── Utility views ─────────────────────────────────────────────
+
+-- Last 24 hours (dashboard default window)
+CREATE OR REPLACE VIEW v_events_24h AS
+SELECT *
+FROM   attack_events
+WHERE  event_time >= NOW() - INTERVAL '24 hours';
+
+-- RPM buckets — last 30 minutes (30 x 1-minute slots)
+CREATE OR REPLACE VIEW v_rpm_30min AS
+SELECT
+    FLOOR((EXTRACT(EPOCH FROM NOW()) - timestamp) / 60)::INT  AS mins_ago,
+    COUNT(*)                                                   AS total,
+    COUNT(*) FILTER (WHERE action = 'BLOCK')                  AS blocked
+FROM   attack_events
+WHERE  timestamp >= EXTRACT(EPOCH FROM NOW()) - 1800
+GROUP  BY 1
+ORDER  BY 1;
+
+-- Top threat IPs (last 24 h)
+CREATE OR REPLACE VIEW v_top_ips AS
+SELECT
+    ip,
+    COUNT(*)                                              AS total_requests,
+    COUNT(*) FILTER (WHERE action = 'BLOCK')             AS blocked,
+    MAX(final_score)                                      AS max_score,
+    MAX(timestamp)  FILTER (WHERE action = 'BLOCK')      AS last_attack_ts
+FROM   v_events_24h
+GROUP  BY ip
+ORDER  BY blocked DESC, max_score DESC;
+
+-- Attack type breakdown (last 24 h)
+CREATE OR REPLACE VIEW v_attack_types AS
+SELECT
+    best_label,
+    COUNT(*) AS cnt
+FROM   v_events_24h
+WHERE  best_label NOT IN ('clean', 'norm', 'normal', 'unknown', '')
+GROUP  BY best_label
+ORDER  BY cnt DESC;
+
+-- Detection layer breakdown (unnest JSONB, last 24 h)
+CREATE OR REPLACE VIEW v_layer_counts AS
+SELECT
+    ls->>'layer'  AS layer,
+    COUNT(*)      AS cnt
+FROM   v_events_24h,
+       jsonb_array_elements(layer_scores) AS ls
+WHERE  (ls->>'triggered')::boolean = TRUE
+GROUP  BY 1
+ORDER  BY cnt DESC;
+
+-- ── AI Threat Analysis table ──────────────────────────────────
+-- Stores Claude-generated deep analysis for high-confidence threats.
+-- Populated asynchronously by the AI worker; never in the request path.
+CREATE TABLE IF NOT EXISTS threat_analyses (
+    id                    BIGSERIAL       PRIMARY KEY,
+    event_id              VARCHAR(36)     NOT NULL,           -- links to attack_events.request_id
+    analysis_timestamp    TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+
+    -- Classification (from Claude)
+    attack_type           VARCHAR(100)    NOT NULL DEFAULT '',
+    owasp_category        VARCHAR(200)    NOT NULL DEFAULT '',
+    severity              VARCHAR(20)     NOT NULL DEFAULT 'MEDIUM',
+    confidence            REAL            NOT NULL DEFAULT 0,
+    is_novel_variant      BOOLEAN         NOT NULL DEFAULT FALSE,
+
+    -- MITRE ATT&CK
+    mitre_id              VARCHAR(20)     NOT NULL DEFAULT '',
+    mitre_name            VARCHAR(200)    NOT NULL DEFAULT '',
+    mitre_tactic          VARCHAR(100)    NOT NULL DEFAULT '',
+    kill_chain_phase      VARCHAR(100)    NOT NULL DEFAULT '',
+
+    -- Analysis text
+    root_cause_analysis   TEXT            NOT NULL DEFAULT '',
+    attack_sophistication VARCHAR(50)     NOT NULL DEFAULT '',
+    analyst_summary       TEXT            NOT NULL DEFAULT '',
+
+    -- Structured recommendations (JSONB arrays)
+    evasion_techniques    JSONB           NOT NULL DEFAULT '[]',
+    waf_rules             JSONB           NOT NULL DEFAULT '[]',
+    regex_patterns        JSONB           NOT NULL DEFAULT '[]',
+    threshold_adjustments JSONB           NOT NULL DEFAULT '{}',
+    immediate_actions     JSONB           NOT NULL DEFAULT '[]',
+    long_term_fixes       JSONB           NOT NULL DEFAULT '[]',
+    iocs                  JSONB           NOT NULL DEFAULT '[]',
+
+    -- Threat intelligence context
+    global_prevalence     VARCHAR(20)     NOT NULL DEFAULT 'isolated',
+    honeydb_count         INT             NOT NULL DEFAULT 0,
+    abuseipdb_score       INT             NOT NULL DEFAULT 0,
+
+    -- Full raw analysis for future re-parsing
+    full_analysis         JSONB           NOT NULL DEFAULT '{}',
+
+    created_at            TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT uq_ta_event_id UNIQUE (event_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ta_event_id         ON threat_analyses (event_id);
+CREATE INDEX IF NOT EXISTS idx_ta_severity         ON threat_analyses (severity);
+CREATE INDEX IF NOT EXISTS idx_ta_analysis_time    ON threat_analyses (analysis_timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_ta_novel            ON threat_analyses (is_novel_variant) WHERE is_novel_variant = TRUE;
+CREATE INDEX IF NOT EXISTS idx_ta_attack_type      ON threat_analyses (attack_type);
+
+-- ── Adaptive Rules table ───────────────────────────────────────
+-- Persistent mirror of Redis adaptive:rules hash.
+-- Source of truth is Redis (hot path); this table is for audit/analytics.
+CREATE TABLE IF NOT EXISTS adaptive_rules (
+    id                BIGSERIAL       PRIMARY KEY,
+    rule_id           VARCHAR(8)      NOT NULL,
+    pattern           TEXT            NOT NULL,
+    attack_type       VARCHAR(50)     NOT NULL DEFAULT '',
+    source_event_id   VARCHAR(36),                          -- links to threat_analyses.event_id
+    severity          VARCHAR(20)     NOT NULL DEFAULT 'HIGH',
+    confidence        REAL            NOT NULL DEFAULT 0,
+    status            VARCHAR(20)     NOT NULL DEFAULT 'active',   -- active | rejected
+    match_count       INT             NOT NULL DEFAULT 0,
+    created_at        TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+    last_matched_at   TIMESTAMPTZ,
+
+    CONSTRAINT uq_ar_rule_id  UNIQUE (rule_id),
+    CONSTRAINT uq_ar_pattern  UNIQUE (pattern)              -- prevent exact duplicates
+);
+
+CREATE INDEX IF NOT EXISTS idx_ar_attack_type  ON adaptive_rules (attack_type);
+CREATE INDEX IF NOT EXISTS idx_ar_status       ON adaptive_rules (status);
+CREATE INDEX IF NOT EXISTS idx_ar_created_at   ON adaptive_rules (created_at DESC);

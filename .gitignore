@@ -73,3 +73,7 @@ desktop.ini
 export/
 
 
+
+node_modules
+
+.env

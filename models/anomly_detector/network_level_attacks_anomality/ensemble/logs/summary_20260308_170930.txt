@@ -1,0 +1,24 @@
+======================================================================
+MULTI-MODEL ENSEMBLE — TRAINING SUMMARY
+======================================================================
+Timestamp      : 20260308_170930
+Models         : AE + VAE + OCC-Net + IsolationForest
+Train (benign) : 1,589,924
+Val   (benign) : 340,698
+Attack (eval)  : 540,497
+Threshold      : 0.169320  (p95.0)
+
+Ensemble weights:
+  AE             : 0.1500
+  VAE            : 0.4000
+  OCC            : 0.4000
+  IsoForest      : 0.0500
+
+Final Ensemble Performance:
+  Accuracy              : 98.51%
+  Precision             : 97.97%
+  Detection Rate        : 99.63%
+  F1                    : 98.80%
+  AUC-ROC               : 99.84%
+  False Positive Rate   : 3.27%
+  False Negative Rate   : 0.37%

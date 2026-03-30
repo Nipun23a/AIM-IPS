@@ -442,6 +442,212 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* ── Research Gaps ───────────────────────────────────────────────────── */}
+      <section className="px-4 py-20 bg-slate-900/40">
+        <div className="max-w-5xl mx-auto">
+          <div className="text-center mb-14">
+            <div className="text-xs text-red-400 font-semibold uppercase tracking-widest mb-3">Motivation</div>
+            <h2 className="text-3xl md:text-4xl font-black text-white mb-4">5 Critical Research Gaps</h2>
+            <p className="text-slate-400 max-w-2xl mx-auto leading-relaxed">
+              A systematic literature review identified five critical gaps in current intrusion prevention systems.
+              AIM-IPS was designed to address every one of them.
+            </p>
+          </div>
+
+          <div className="space-y-6">
+
+            {/* GAP 1 */}
+            <div className="rounded-2xl border border-orange-500/30 bg-orange-500/5 p-6 md:p-8">
+              <div className="flex flex-col md:flex-row gap-6">
+                <div className="flex-shrink-0">
+                  <div className="w-14 h-14 rounded-2xl bg-orange-500/15 border border-orange-500/30 flex items-center justify-center">
+                    <span className="text-2xl font-black text-orange-400">1</span>
+                  </div>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-lg font-bold text-white mb-2">Limited Integration of Response Mechanisms</h3>
+                  <p className="text-slate-400 text-sm leading-relaxed mb-4">
+                    Most IDS research focuses solely on detection accuracy while neglecting autonomous mitigation.
+                    Ali &amp; Jack's 2022 reinforcement learning approach remained experimental. Ismail's AI-driven
+                    system achieved 1.5s reaction time but relied on static datasets and offline inference.
+                    Critically, existing approaches provide only binary <span className="text-slate-300 font-medium">block or allow</span> decisions with no proportional response.
+                  </p>
+                  <div className="bg-orange-500/10 border border-orange-500/20 rounded-xl p-4">
+                    <div className="text-xs text-orange-400 font-semibold uppercase tracking-wider mb-2">AIM-IPS Solution</div>
+                    <p className="text-slate-300 text-sm leading-relaxed">
+                      Five graduated response actions — <span className="font-mono text-green-400">ALLOW</span>, <span className="font-mono text-yellow-400">DELAY</span>, <span className="font-mono text-orange-400">THROTTLE</span>, <span className="font-mono text-red-400">CAPTCHA</span>, <span className="font-mono text-red-600">BLOCK</span> — calibrated to threat confidence.
+                      A scanner hitting THROTTLE experiences a 3-second artificial delay per request, reducing scan rate by <span className="text-white font-bold">99%</span> without impacting legitimate users.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* GAP 2 */}
+            <div className="rounded-2xl border border-blue-500/30 bg-blue-500/5 p-6 md:p-8">
+              <div className="flex flex-col md:flex-row gap-6">
+                <div className="flex-shrink-0">
+                  <div className="w-14 h-14 rounded-2xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center">
+                    <span className="text-2xl font-black text-blue-400">2</span>
+                  </div>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-lg font-bold text-white mb-2">Lack of Middleware / API-Based Deployment for Web Applications</h3>
+                  <p className="text-slate-400 text-sm leading-relaxed mb-4">
+                    Most academic works are evaluated on controlled datasets like NSL-KDD with no consideration
+                    for production environments. Diaz-Verdejo's 2022 evaluation of Snort and ModSecurity showed
+                    these tools require continuous tuning and <span className="text-slate-300 font-medium">fail against zero-day attacks</span>.
+                    No existing IPS framework is deployable as a drop-in web middleware.
+                  </p>
+                  <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4">
+                    <div className="text-xs text-blue-400 font-semibold uppercase tracking-wider mb-2">AIM-IPS Solution</div>
+                    <p className="text-slate-300 text-sm leading-relaxed">
+                      <span className="font-mono text-blue-300">IPSMiddleware</span> implemented as a FastAPI ASGI component that intercepts every HTTP request in-path.
+                      Production-deployed on Ubuntu 22.04 behind Nginx with SSL termination, processing real traffic with end-to-end latency under <span className="text-white font-bold">5ms</span>.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* GAP 3 */}
+            <div className="rounded-2xl border border-yellow-500/30 bg-yellow-500/5 p-6 md:p-8">
+              <div className="flex flex-col md:flex-row gap-6">
+                <div className="flex-shrink-0">
+                  <div className="w-14 h-14 rounded-2xl bg-yellow-500/15 border border-yellow-500/30 flex items-center justify-center">
+                    <span className="text-2xl font-black text-yellow-400">3</span>
+                  </div>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-lg font-bold text-white mb-2">Scalability and Adaptability to Evolving Attacks</h3>
+                  <p className="text-slate-400 text-sm leading-relaxed mb-4">
+                    Models like AE-IDS and AE-LSTM show strong benchmark results but degrade in live environments
+                    as new attack variants emerge. Mirsky's Kitsune showed promise in IoT scenarios but didn't extend
+                    to enterprise-scale web environments. <span className="text-slate-300 font-medium">No existing system adapts its rules without retraining.</span>
+                  </p>
+                  <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-4">
+                    <div className="text-xs text-yellow-400 font-semibold uppercase tracking-wider mb-2">AIM-IPS Solution</div>
+                    <p className="text-slate-300 text-sm leading-relaxed">
+                      TFLite optimisation reduces CNN inference from 52ms to under <span className="text-white font-bold">5ms (10× faster)</span>.
+                      Autonomous Adaptive Rule Injection: Claude-generated regex patterns are hot-reloaded into Layer 1 via Redis every 30 seconds —
+                      no model retraining, no system restart. Novel attack variants progressively migrate from expensive ML inference to cheap regex matching.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* GAP 4 */}
+            <div className="rounded-2xl border border-red-500/30 bg-red-500/5 p-6 md:p-8">
+              <div className="flex flex-col md:flex-row gap-6">
+                <div className="flex-shrink-0">
+                  <div className="w-14 h-14 rounded-2xl bg-red-500/15 border border-red-500/30 flex items-center justify-center">
+                    <span className="text-2xl font-black text-red-400">4</span>
+                  </div>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-2">
+                    <h3 className="text-lg font-bold text-white">Absence of Cross-Layer Threat Correlation</h3>
+                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-red-500/20 border border-red-500/40 text-red-400">Key Contribution</span>
+                  </div>
+                  <p className="text-slate-400 text-sm leading-relaxed mb-4">
+                    Network-layer tools like Snort monitor packets for DDoS and port scans.
+                    Application-layer WAFs monitor HTTP for injection attacks.
+                    <span className="text-slate-300 font-medium"> No existing framework correlates intelligence across both layers</span> to identify
+                    multi-stage coordinated attacks. A port scan below threshold followed by SQL injection below threshold
+                    will individually evade any single-layer system.
+                  </p>
+                  <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4">
+                    <div className="text-xs text-red-400 font-semibold uppercase tracking-wider mb-2">AIM-IPS Solution</div>
+                    <p className="text-slate-300 text-sm leading-relaxed mb-3">
+                      Dedicated cross-pipeline correlation engine tracks per-IP events across both pipelines in Redis within a <span className="text-white font-bold">10-second window</span>.
+                      Threat score is amplified proportional to attack diversity.
+                    </p>
+                    <div className="grid grid-cols-3 gap-2 text-center font-mono text-xs">
+                      <div className="rounded-lg bg-slate-900 border border-slate-700 p-2">
+                        <div className="text-slate-400 font-bold">×1.0</div>
+                        <div className="text-slate-500 mt-0.5">1 type</div>
+                      </div>
+                      <div className="rounded-lg bg-yellow-900/30 border border-yellow-700/40 p-2">
+                        <div className="text-yellow-400 font-bold">×1.3</div>
+                        <div className="text-slate-500 mt-0.5">2 types</div>
+                      </div>
+                      <div className="rounded-lg bg-red-900/30 border border-red-700/40 p-2">
+                        <div className="text-red-400 font-bold">×1.5–1.7</div>
+                        <div className="text-slate-500 mt-0.5">3–4 types</div>
+                      </div>
+                    </div>
+                    <p className="text-slate-400 text-xs mt-3 font-mono">
+                      Example: SQLi at CAPTCHA (0.65) + prior port scan → <span className="text-red-300">0.65 × 1.3 = 0.845 → BLOCK</span>
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* GAP 5 */}
+            <div className="rounded-2xl border border-purple-500/30 bg-purple-500/5 p-6 md:p-8">
+              <div className="flex flex-col md:flex-row gap-6">
+                <div className="flex-shrink-0">
+                  <div className="w-14 h-14 rounded-2xl bg-purple-500/15 border border-purple-500/30 flex items-center justify-center">
+                    <span className="text-2xl font-black text-purple-400">5</span>
+                  </div>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-lg font-bold text-white mb-2">Lack of Autonomous Explainable Threat Intelligence</h3>
+                  <p className="text-slate-400 text-sm leading-relaxed mb-4">
+                    While SHAP and LIME have been applied to IDS outputs in offline settings, <span className="text-slate-300 font-medium">no existing IPS
+                    autonomously generates structured threat explanations</span>, maps to MITRE ATT&amp;CK, or produces
+                    ready-to-deploy defensive artifacts like WAF rules — all without impacting latency.
+                    Security analysts are left interpreting raw anomaly scores with no contextual guidance.
+                  </p>
+                  <div className="bg-purple-500/10 border border-purple-500/20 rounded-xl p-4">
+                    <div className="text-xs text-purple-400 font-semibold uppercase tracking-wider mb-3">AIM-IPS Solution</div>
+                    <p className="text-slate-300 text-sm leading-relaxed mb-3">
+                      Asynchronous AI reasoning agent powered by Claude Sonnet. For any request scoring above 0.65,
+                      the system enqueues it for deep analysis — decoupled via Redis queue with <span className="text-white font-bold">zero impact</span> on sub-5ms request latency.
+                    </p>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                      {[
+                        { label: "Attack Classification", sub: "OWASP category · severity", color: "text-red-400" },
+                        { label: "MITRE ATT&CK Mapping", sub: "Technique · Kill Chain phase", color: "text-orange-400" },
+                        { label: "WAF Rules + IOCs",      sub: "Ready-to-deploy ModSecurity", color: "text-cyan-400" },
+                        { label: "Threat Intel Fusion",   sub: "HoneyDB · AbuseIPDB",        color: "text-green-400" },
+                      ].map(({ label, sub, color }) => (
+                        <div key={label} className="rounded-lg bg-slate-900 border border-slate-700 p-2.5 text-center">
+                          <div className={`font-semibold ${color} mb-0.5`}>{label}</div>
+                          <div className="text-slate-500 font-mono">{sub}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          {/* Summary row */}
+          <div className="mt-10 bg-slate-900 rounded-2xl border border-slate-800 p-6">
+            <div className="text-xs text-slate-500 font-semibold uppercase tracking-wider text-center mb-5">AIM-IPS addresses all five gaps</div>
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-3 text-xs text-center">
+              {[
+                { num: "G1", label: "Graduated Response Engine",          color: "border-orange-500/30 bg-orange-500/5 text-orange-400" },
+                { num: "G2", label: "FastAPI Middleware Deployment",       color: "border-blue-500/30 bg-blue-500/5 text-blue-400" },
+                { num: "G3", label: "TFLite + Adaptive Rule Injection",   color: "border-yellow-500/30 bg-yellow-500/5 text-yellow-400" },
+                { num: "G4", label: "Cross-Pipeline Correlation Engine",  color: "border-red-500/30 bg-red-500/5 text-red-400" },
+                { num: "G5", label: "Autonomous AI Reasoning Agent",      color: "border-purple-500/30 bg-purple-500/5 text-purple-400" },
+              ].map(({ num, label, color }) => (
+                <div key={num} className={`rounded-xl border p-3 ${color}`}>
+                  <div className="font-black text-base mb-1">{num}</div>
+                  <div className="text-slate-300 leading-snug">{label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* ── Pipeline Architecture ────────────────────────────────────────────── */}
       <section className="px-4 py-16 bg-slate-900/40">
         <div className="max-w-5xl mx-auto">

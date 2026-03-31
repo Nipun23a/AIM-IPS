@@ -370,8 +370,23 @@ def preprocess(df: pd.DataFrame):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def rows_to_unified_dicts(df: pd.DataFrame) -> list:
-    """Convert DataFrame rows to list of unified feature dicts (LightGBM input)."""
-    return df[UNIFIED_FEATURES].to_dict(orient="records")
+    """
+    Convert DataFrame rows to feature dicts for LightGBM.
+    LGBMNetworkClassifier._vectorize() uses THREAT_FEATURES keys
+    (space-separated, e.g. 'flow duration') loaded from features.pkl.
+    We supply BOTH unified (underscore) and threat (space) key variants
+    so features.pkl resolves correctly regardless of which was used at
+    training time.
+    """
+    records = []
+    for row in df[UNIFIED_FEATURES].itertuples(index=False):
+        d = dict(zip(UNIFIED_FEATURES, row))
+        # Add space-separated aliases for THREAT_FEATURES
+        for unified_col, threat_col in UNIFIED_TO_THREAT.items():
+            if unified_col in d:
+                d[threat_col] = d[unified_col]
+        records.append(d)
+    return records
 
 
 def rows_to_threat_dicts(df: pd.DataFrame) -> list:

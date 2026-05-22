@@ -177,6 +177,24 @@ CREATE INDEX IF NOT EXISTS idx_ta_analysis_time    ON threat_analyses (analysis_
 CREATE INDEX IF NOT EXISTS idx_ta_novel            ON threat_analyses (is_novel_variant) WHERE is_novel_variant = TRUE;
 CREATE INDEX IF NOT EXISTS idx_ta_attack_type      ON threat_analyses (attack_type);
 
+-- ── Network Threats table ─────────────────────────────────────
+-- Persisted output of the network-layer classifier (NetworkClassifier).
+-- Written by the network IPS background process; joined against
+-- attack_events for cross-pipeline temporal correlation queries.
+CREATE TABLE IF NOT EXISTS network_threats (
+    id          BIGSERIAL       PRIMARY KEY,
+    source_ip   VARCHAR(45)     NOT NULL,
+    attack_type VARCHAR(100)    NOT NULL DEFAULT 'unknown',
+    fused_score REAL            NOT NULL DEFAULT 0,
+    lgbm_score  REAL            NOT NULL DEFAULT 0,
+    created_at  TIMESTAMPTZ     NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_nt_source_ip  ON network_threats (source_ip);
+CREATE INDEX IF NOT EXISTS idx_nt_created_at ON network_threats (created_at DESC);
+-- Composite: temporal JOIN in fetch_correlated_threats
+CREATE INDEX IF NOT EXISTS idx_nt_ip_time    ON network_threats (source_ip, created_at DESC);
+
 -- ── Adaptive Rules table ───────────────────────────────────────
 -- Persistent mirror of Redis adaptive:rules hash.
 -- Source of truth is Redis (hot path); this table is for audit/analytics.

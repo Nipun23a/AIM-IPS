@@ -11,7 +11,7 @@ empty list so main.py can fall back to Redis or mock data).
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import asyncpg
@@ -259,3 +259,85 @@ async def fetch_stats() -> Optional[dict]:
         "layer_counts":      layer_counts,
         "top_ips":           top_ips,
     }
+
+
+# ── Correlated-threat query ───────────────────────────────────────────────────
+
+async def fetch_correlated_threats(
+    limit: int = 50,
+    min_fused_score: float = 0.65,
+    gap_seconds: int = 25,
+) -> Optional[list]:
+    """
+    Returns application-layer attack events that were preceded by a
+    network-level threat from the same IP within `gap_seconds` seconds,
+    filtered to events where the application fused score >= `min_fused_score`.
+
+    Implements:
+        SELECT
+            ae.ip            AS source_ip,
+            ae.best_label    AS app_attack,
+            ae.created_at    AS app_time,
+            nl.attack_type   AS net_attack,
+            nl.created_at    AS net_time,
+            EXTRACT(EPOCH FROM (ae.created_at - nl.created_at)) AS gap_seconds
+        FROM  attack_events ae
+        JOIN  network_threats nl
+              ON  ae.ip = nl.source_ip
+              AND ae.created_at > nl.created_at
+              AND ae.created_at < nl.created_at + INTERVAL '25 seconds'
+        WHERE ae.final_score >= 0.65
+        ORDER BY gap_seconds ASC
+        LIMIT 50;
+
+    Column-name mapping from the original SQL to this schema:
+        source_ip   → attack_events.ip
+        attack_type → attack_events.best_label
+        fused_score → attack_events.final_score
+
+    Returns None if PostgreSQL is unavailable.
+    """
+    if not await _pool_ok():
+        return None
+
+    query = """
+        SELECT
+            ae.ip                                                AS source_ip,
+            ae.best_label                                        AS app_attack,
+            ae.created_at                                        AS app_time,
+            nl.attack_type                                       AS net_attack,
+            nl.created_at                                        AS net_time,
+            EXTRACT(EPOCH FROM (ae.created_at - nl.created_at)) AS gap_seconds
+        FROM   attack_events ae
+        JOIN   network_threats nl
+               ON  ae.ip = nl.source_ip
+               AND ae.created_at > nl.created_at
+               AND ae.created_at < nl.created_at + $3::interval
+        WHERE  ae.final_score >= $1
+        ORDER  BY gap_seconds ASC
+        LIMIT  $2
+    """
+
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                query,
+                min_fused_score,
+                limit,
+                timedelta(seconds=gap_seconds),
+            )
+    except Exception as e:
+        logger.error("[DBReader] fetch_correlated_threats error: %s", e)
+        return None
+
+    return [
+        {
+            "source_ip":   r["source_ip"],
+            "app_attack":  r["app_attack"],
+            "app_time":    r["app_time"],
+            "net_attack":  r["net_attack"],
+            "net_time":    r["net_time"],
+            "gap_seconds": round(float(r["gap_seconds"]), 3),
+        }
+        for r in rows
+    ]

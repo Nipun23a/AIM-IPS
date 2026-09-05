@@ -1,0 +1,15 @@
+\begin{table*}[htbp]
+\centering
+\caption{Strategy comparison across scenarios}
+\label{tab:strategy_comparison}
+\begin{tabular}{llcccccc}
+\toprule
+Scenario & Strategy & Precision & Recall & F1 & FPR & $\tau$-Pass & Latency ($\mu$s) \\
+\midrule
+unbounded & ValidationOptimised_theta_0.9200_ & 0.996 & 0.982 & 0.989 & 0.002 & \checkmark & 2 \\
+ & ContextAdaptive_alpha_0.02_margin_0.02_unbounded_ & 0.957 & 0.990 & 0.973 & 0.027 & \checkmark & 64 \\
+ & FixedThreshold_theta_0.5_ & 0.936 & 0.998 & 0.966 & 0.041 & \checkmark & 3 \\
+\midrule
+\bottomrule
+\end{tabular}
+\end{table*}

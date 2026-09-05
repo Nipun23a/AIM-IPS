@@ -1,0 +1,208 @@
+{
+  "config": {
+    "target_context": "(/api/users/{id}, POST)",
+    "poison_start": 0.2,
+    "poison_end": 0.7,
+    "poison_score_range": [
+      0.25,
+      0.85
+    ],
+    "attack_score": 0.88,
+    "n_attack_requests": 100,
+    "poison_injected": 200,
+    "theta_global": 0.9200000000000002
+  },
+  "bounded": {
+    "summary": {
+      "FixedThreshold(theta=0.5)": {
+        "n_requests": 24854,
+        "tp": 9335,
+        "fp": 640,
+        "tn": 14861,
+        "fn": 18,
+        "precision": 0.9358395989974937,
+        "recall": 0.9980754838019886,
+        "f1": 0.9659561258278145,
+        "fpr": 0.04128765886071866,
+        "fnr": 0.0019245161980113333,
+        "passes_recall_floor": true,
+        "recall_floor": 0.95,
+        "mean_latency_us": 2.3288404281001047,
+        "p50_latency_us": 2.0,
+        "p99_latency_us": 4.0,
+        "max_latency_us": 338.0
+      },
+      "ValidationOptimised(theta=0.9200)": {
+        "n_requests": 24854,
+        "tp": 9185,
+        "fp": 36,
+        "tn": 15465,
+        "fn": 168,
+        "precision": 0.9960958681271012,
+        "recall": 0.9820378488185609,
+        "f1": 0.9890169053515667,
+        "fpr": 0.002322430810915425,
+        "fnr": 0.01796215118143911,
+        "passes_recall_floor": true,
+        "recall_floor": 0.95,
+        "mean_latency_us": 2.227890882755291,
+        "p50_latency_us": 2.0,
+        "p99_latency_us": 4.0,
+        "max_latency_us": 564.0
+      },
+      "ContextAdaptive(alpha=0.02, margin=0.02, delta=0.15)": {
+        "n_requests": 24854,
+        "tp": 9260,
+        "fp": 181,
+        "tn": 15320,
+        "fn": 93,
+        "precision": 0.9808283020866434,
+        "recall": 0.9900566663102748,
+        "f1": 0.9854208790039375,
+        "fpr": 0.011676666021546997,
+        "fnr": 0.009943333689725222,
+        "passes_recall_floor": true,
+        "recall_floor": 0.95,
+        "mean_latency_us": 49.11016335398729,
+        "p50_latency_us": 54.0,
+        "p99_latency_us": 153.0,
+        "max_latency_us": 47324.0
+      }
+    },
+    "poisoning_analysis": {
+      "FixedThreshold(theta=0.5)": {
+        "total_attacks": 1961,
+        "attacks_missed": 0,
+        "attack_miss_rate": 0.0,
+        "mean_threshold": 0.5,
+        "threshold_drift": -0.42000000000000015,
+        "theta_global": 0.9200000000000002
+      },
+      "ValidationOptimised(theta=0.9200)": {
+        "total_attacks": 1961,
+        "attacks_missed": 96,
+        "attack_miss_rate": 0.04895461499235084,
+        "mean_threshold": 0.92,
+        "threshold_drift": -1.1102230246251565e-16,
+        "theta_global": 0.9200000000000002
+      },
+      "ContextAdaptive(alpha=0.02, margin=0.02, delta=0.15)": {
+        "total_attacks": 1961,
+        "attacks_missed": 21,
+        "attack_miss_rate": 0.010708822029576747,
+        "mean_threshold": 0.8637392945080394,
+        "threshold_drift": -0.056260705491960716,
+        "theta_global": 0.9200000000000002
+      }
+    }
+  },
+  "unbounded": {
+    "summary": {
+      "FixedThreshold(theta=0.5)": {
+        "n_requests": 24854,
+        "tp": 9335,
+        "fp": 640,
+        "tn": 14861,
+        "fn": 18,
+        "precision": 0.9358395989974937,
+        "recall": 0.9980754838019886,
+        "f1": 0.9659561258278145,
+        "fpr": 0.04128765886071866,
+        "fnr": 0.0019245161980113333,
+        "passes_recall_floor": true,
+        "recall_floor": 0.95,
+        "mean_latency_us": 2.0970467530377404,
+        "p50_latency_us": 2.0,
+        "p99_latency_us": 3.0,
+        "max_latency_us": 41.0
+      },
+      "ValidationOptimised(theta=0.9200)": {
+        "n_requests": 24854,
+        "tp": 9185,
+        "fp": 36,
+        "tn": 15465,
+        "fn": 168,
+        "precision": 0.9960958681271012,
+        "recall": 0.9820378488185609,
+        "f1": 0.9890169053515667,
+        "fpr": 0.002322430810915425,
+        "fnr": 0.01796215118143911,
+        "passes_recall_floor": true,
+        "recall_floor": 0.95,
+        "mean_latency_us": 2.0160537539229098,
+        "p50_latency_us": 2.0,
+        "p99_latency_us": 2.0,
+        "max_latency_us": 45.0
+      },
+      "ContextAdaptive(alpha=0.02, margin=0.02, unbounded)": {
+        "n_requests": 24854,
+        "tp": 9260,
+        "fp": 415,
+        "tn": 15086,
+        "fn": 93,
+        "precision": 0.9571059431524548,
+        "recall": 0.9900566663102748,
+        "f1": 0.9733025015766239,
+        "fpr": 0.026772466292497257,
+        "fnr": 0.009943333689725222,
+        "passes_recall_floor": true,
+        "recall_floor": 0.95,
+        "mean_latency_us": 43.9981894262493,
+        "p50_latency_us": 53.0,
+        "p99_latency_us": 64.0,
+        "max_latency_us": 58547.0
+      }
+    },
+    "poisoning_analysis": {
+      "FixedThreshold(theta=0.5)": {
+        "total_attacks": 1961,
+        "attacks_missed": 0,
+        "attack_miss_rate": 0.0,
+        "mean_threshold": 0.5,
+        "threshold_drift": -0.42000000000000015,
+        "theta_global": 0.9200000000000002
+      },
+      "ValidationOptimised(theta=0.9200)": {
+        "total_attacks": 1961,
+        "attacks_missed": 96,
+        "attack_miss_rate": 0.04895461499235084,
+        "mean_threshold": 0.92,
+        "threshold_drift": -1.1102230246251565e-16,
+        "theta_global": 0.9200000000000002
+      },
+      "ContextAdaptive(alpha=0.02, margin=0.02, unbounded)": {
+        "total_attacks": 1961,
+        "attacks_missed": 21,
+        "attack_miss_rate": 0.010708822029576747,
+        "mean_threshold": 0.8637392945080394,
+        "threshold_drift": -0.056260705491960716,
+        "theta_global": 0.9200000000000002
+      }
+    }
+  },
+  "corrected_statistics": {
+    "test_split_size": 24854,
+    "validation_excluded": 6213,
+    "no_leakage": true,
+    "bounded": {
+      "global_mean_threshold": 0.812798271368524,
+      "target_mean_threshold": 0.851816848194547,
+      "min_threshold_at_target": 0.7700000000000001
+    },
+    "unbounded": {
+      "global_mean_threshold": 0.7207678596505633,
+      "target_mean_threshold": 0.7992676171715525,
+      "min_threshold_at_target": 0.4276821400049196
+    },
+    "divergence": {
+      "max_divergence": 0.3423178599950805,
+      "bound_engaged_samples": 1886,
+      "bound_engaged_pct": 29.5
+    },
+    "near_miss": {
+      "attack_score": 0.88,
+      "final_unbounded_threshold": 0.8652412411351109,
+      "margin": 0.014758758864889088
+    }
+  }
+}

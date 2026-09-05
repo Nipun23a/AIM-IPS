@@ -1,0 +1,11 @@
+{
+  "theta_global": 0.11000000000000001,
+  "fit_info": {
+    "metric": "f1",
+    "best_threshold": 0.11000000000000001,
+    "best_score": 0.9393939393939394,
+    "n_validation_samples": 73,
+    "n_attacks": 66,
+    "n_benign": 7
+  }
+}

@@ -1,0 +1,172 @@
+{
+  "config": {
+    "shift_point": 0.5,
+    "shift_magnitude": 0.15,
+    "shift_idx": 12427,
+    "n_samples": 24854
+  },
+  "summary": {
+    "FixedThreshold(theta=0.5)": {
+      "n_requests": 24854,
+      "tp": 9361,
+      "fp": 1341,
+      "tn": 14134,
+      "fn": 18,
+      "precision": 0.8746963184451504,
+      "recall": 0.9980808188506237,
+      "f1": 0.9323240874458443,
+      "fpr": 0.08665589660743134,
+      "fnr": 0.0019191811493762662,
+      "passes_recall_floor": true,
+      "recall_floor": 0.95,
+      "mean_latency_us": 2.224108795364931,
+      "p50_latency_us": 2.0,
+      "p99_latency_us": 4.0,
+      "max_latency_us": 269.0
+    },
+    "ValidationOptimised(theta=0.9200)": {
+      "n_requests": 24854,
+      "tp": 9307,
+      "fp": 105,
+      "tn": 15370,
+      "fn": 72,
+      "precision": 0.9888440288992775,
+      "recall": 0.992323275402495,
+      "f1": 0.9905805970943538,
+      "fpr": 0.00678513731825525,
+      "fnr": 0.007676724597505065,
+      "passes_recall_floor": true,
+      "recall_floor": 0.95,
+      "mean_latency_us": 2.0890399935624044,
+      "p50_latency_us": 2.0,
+      "p99_latency_us": 3.0,
+      "max_latency_us": 78.0
+    },
+    "ContextAdaptive(alpha=0.02, margin=0.02, delta=0.15)": {
+      "n_requests": 24854,
+      "tp": 9307,
+      "fp": 217,
+      "tn": 15258,
+      "fn": 72,
+      "precision": 0.9772154556908862,
+      "recall": 0.992323275402495,
+      "f1": 0.9847114214674919,
+      "fpr": 0.014022617124394184,
+      "fnr": 0.007676724597505065,
+      "passes_recall_floor": true,
+      "recall_floor": 0.95,
+      "mean_latency_us": 39.4784340548805,
+      "p50_latency_us": 54.0,
+      "p99_latency_us": 126.0,
+      "max_latency_us": 40959.0
+    },
+    "ContextAdaptive(alpha=0.02, margin=0.02, unbounded)": {
+      "n_requests": 24854,
+      "tp": 9307,
+      "fp": 347,
+      "tn": 15128,
+      "fn": 72,
+      "precision": 0.9640563496996064,
+      "recall": 0.992323275402495,
+      "f1": 0.9779856039510325,
+      "fpr": 0.022423263327948303,
+      "fnr": 0.007676724597505065,
+      "passes_recall_floor": true,
+      "recall_floor": 0.95,
+      "mean_latency_us": 35.13873018427617,
+      "p50_latency_us": 52.0,
+      "p99_latency_us": 100.0,
+      "max_latency_us": 6650.0
+    }
+  },
+  "shift_analysis": {
+    "FixedThreshold(theta=0.5)": {
+      "pre_shift": {
+        "tp": 4675,
+        "fp": 257,
+        "tn": 7488,
+        "fn": 7,
+        "precision": 0.9478913219789132,
+        "recall": 0.9985049124305853,
+        "fpr": 0.033182698515171076,
+        "n_samples": 12427
+      },
+      "post_shift": {
+        "tp": 4686,
+        "fp": 1084,
+        "tn": 6646,
+        "fn": 11,
+        "precision": 0.8121317157712306,
+        "recall": 0.9976580796252927,
+        "fpr": 0.14023285899094437,
+        "n_samples": 12427
+      }
+    },
+    "ValidationOptimised(theta=0.9200)": {
+      "pre_shift": {
+        "tp": 4653,
+        "fp": 19,
+        "tn": 7726,
+        "fn": 29,
+        "precision": 0.9959332191780822,
+        "recall": 0.993806065783853,
+        "fpr": 0.0024531956100710137,
+        "n_samples": 12427
+      },
+      "post_shift": {
+        "tp": 4654,
+        "fp": 86,
+        "tn": 7644,
+        "fn": 43,
+        "precision": 0.9818565400843882,
+        "recall": 0.990845220353417,
+        "fpr": 0.0111254851228978,
+        "n_samples": 12427
+      }
+    },
+    "ContextAdaptive(alpha=0.02, margin=0.02, delta=0.15)": {
+      "pre_shift": {
+        "tp": 4653,
+        "fp": 72,
+        "tn": 7673,
+        "fn": 29,
+        "precision": 0.9847619047619047,
+        "recall": 0.993806065783853,
+        "fpr": 0.009296320206584894,
+        "n_samples": 12427
+      },
+      "post_shift": {
+        "tp": 4654,
+        "fp": 145,
+        "tn": 7585,
+        "fn": 43,
+        "precision": 0.9697853719524901,
+        "recall": 0.990845220353417,
+        "fpr": 0.018758085381630013,
+        "n_samples": 12427
+      }
+    },
+    "ContextAdaptive(alpha=0.02, margin=0.02, unbounded)": {
+      "pre_shift": {
+        "tp": 4653,
+        "fp": 150,
+        "tn": 7595,
+        "fn": 29,
+        "precision": 0.9687695190505934,
+        "recall": 0.993806065783853,
+        "fpr": 0.019367333763718526,
+        "n_samples": 12427
+      },
+      "post_shift": {
+        "tp": 4654,
+        "fp": 197,
+        "tn": 7533,
+        "fn": 43,
+        "precision": 0.9593898165326736,
+        "recall": 0.990845220353417,
+        "fpr": 0.025485122897800777,
+        "n_samples": 12427
+      }
+    }
+  }
+}
